@@ -187,7 +187,7 @@ def test_rejection_really_does_not_change_balances():
 # ---------- 부분체결 / 미체결 ----------
 
 def test_partial_fill_buys_less_than_requested():
-    ex = FakeExchange(krw=100_000, price=100_000_000, partial_fill_ratio=0.5)
+    ex = FakeExchange(krw=100_000, price=100_000_000, partial_fill_ratio=0.5, fee=0.0)
     order = ex.buy_market("KRW-BTC", 50_000)
 
     assert order.executed_krw == pytest.approx(25_000)

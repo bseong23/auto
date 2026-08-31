@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from .exchange import (
     MIN_ORDER_KRW,
     ExchangeError,
+    TransientError,
     OrderRejected,
     OrderResult,
     UnknownOutcome,
@@ -53,6 +54,7 @@ class FakeExchange:
     orders: dict[str, OrderResult] = field(default_factory=dict)
     calls: list[tuple[str, tuple]] = field(default_factory=list)
 
+    _pending: dict[str, tuple] = field(default_factory=dict)
     _queued_errors: list[Exception] = field(default_factory=list)
     _counter: itertools.count = field(default_factory=lambda: itertools.count(1))
 
@@ -109,26 +111,12 @@ class FakeExchange:
 
     def _settle_buy(self, ticker: str, krw: float) -> OrderResult:
         order_uuid = f"fake-buy-{next(self._counter)}"
-        if self.leave_pending:
-            result = OrderResult(uuid=order_uuid, side="bid", state="wait")
-            self.orders[order_uuid] = result
-            self.krw -= krw  # 미체결이어도 주문금액은 묶인다
-            return result
-
-        spend = krw * self.partial_fill_ratio
-        fill_price = self.price * (1 + self.slippage)
-        fee = spend * self.fee
-        volume = (spend - fee) / fill_price
-
-        self.krw -= spend
-        self.coin += volume
-
-        result = OrderResult(
-            uuid=order_uuid, side="bid",
-            state="done" if self.partial_fill_ratio >= 1.0 else "cancel",
-            executed_volume=volume, executed_krw=spend, paid_fee=fee,
-        )
+        self.krw -= krw  # 주문 금액은 즉시 묶인다
+        result = OrderResult(uuid=order_uuid, side="bid", state="wait")
         self.orders[order_uuid] = result
+        self._pending[order_uuid] = ("bid", ticker, krw)
+        if not self.leave_pending:
+            self._fill(order_uuid)
         return result
 
     def sell_market(self, ticker: str, volume: float) -> OrderResult:
@@ -152,27 +140,49 @@ class FakeExchange:
 
     def _settle_sell(self, ticker: str, volume: float) -> OrderResult:
         order_uuid = f"fake-sell-{next(self._counter)}"
-        if self.leave_pending:
-            result = OrderResult(uuid=order_uuid, side="ask", state="wait")
-            self.orders[order_uuid] = result
-            self.coin -= volume
-            return result
-
-        sold = min(volume * self.partial_fill_ratio, self.coin)
-        fill_price = self.price * (1 - self.slippage)
-        gross = sold * fill_price
-        fee = gross * self.fee
-
-        self.coin -= sold
-        self.krw += gross - fee
-
-        result = OrderResult(
-            uuid=order_uuid, side="ask",
-            state="done" if self.partial_fill_ratio >= 1.0 else "cancel",
-            executed_volume=sold, executed_krw=gross, paid_fee=fee,
-        )
+        self.coin -= volume  # 수량이 즉시 묶인다
+        result = OrderResult(uuid=order_uuid, side="ask", state="wait")
         self.orders[order_uuid] = result
+        self._pending[order_uuid] = ("ask", ticker, volume)
+        if not self.leave_pending:
+            self._fill(order_uuid)
         return result
+
+    def _fill(self, order_uuid: str) -> OrderResult:
+        """묶여 있던 주문을 체결 처리한다.
+
+        업비트 응답 규약을 따른다:
+        - `executed_funds` = 실제 거래에 쓰인 금액 (**수수료 제외**)
+        - `paid_fee` = 별도로 뗀 수수료
+        매수는 (금액 - 수수료)만큼 코인을 받고, 매도는 (금액 - 수수료)만큼 원화를 받는다.
+        """
+        order = self.orders[order_uuid]
+        side, _ticker, amount = self._pending.pop(order_uuid)
+        filled_ratio = min(max(self.partial_fill_ratio, 0.0), 1.0)
+
+        if side == "bid":
+            spend = amount * filled_ratio
+            fill_price = self.price * (1 + self.slippage)
+            fee = spend * self.fee
+            volume = (spend - fee) / fill_price
+            self.coin += volume
+            self.krw += amount - spend  # 체결 안 된 만큼 되돌려받는다
+            order.executed_volume = volume
+            order.executed_krw = spend - fee
+            order.paid_fee = fee
+        else:
+            sold = amount * filled_ratio
+            fill_price = self.price * (1 - self.slippage)
+            gross = sold * fill_price
+            fee = gross * self.fee
+            self.krw += gross - fee
+            self.coin += amount - sold  # 체결 안 된 만큼 되돌려받는다
+            order.executed_volume = sold
+            order.executed_krw = gross
+            order.paid_fee = fee
+
+        order.state = "done" if filled_ratio >= 1.0 else "cancel"
+        return order
 
     # ---------- 테스트 편의 ----------
 
@@ -184,12 +194,27 @@ class FakeExchange:
     def fill_pending(self, order_uuid: str) -> OrderResult:
         """미체결로 남겨둔 주문을 체결시킨다."""
         order = self.orders[order_uuid]
-        if not order.is_pending:
-            return order
-        # 간단히: 묶여있던 금액/수량이 그대로 체결된 것으로 처리
-        order.state = "done"
-        return order
+        return order if not order.is_pending else self._fill(order_uuid)
 
     @property
     def equity(self) -> float:
         return self.krw + self.coin * self.price
+
+
+class PaperExchange(FakeExchange):
+    """모의 거래 — **실제 시세**로 움직이지만 주문은 가상 잔고에만 반영된다.
+
+    가짜 가격으로 도는 FakeExchange 와 달리, 현재가를 실제 업비트에서 읽어온다.
+    그래서 모의 모드가 "주문 흉내"가 아니라 진짜 페이퍼 트레이딩이 된다.
+    주문 경로는 실전과 완전히 같은 코드를 탄다.
+    """
+
+    def get_current_price(self, ticker: str) -> float:
+        import pyupbit
+
+        price = pyupbit.get_current_price(ticker)
+        if price is None:
+            raise TransientError(f"{ticker} 현재가 조회 실패")
+        self.price = float(price)
+        self.calls.append(("get_current_price", (ticker,)))
+        return self.price
