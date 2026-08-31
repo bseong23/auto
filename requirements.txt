@@ -1,4 +1,4 @@
-pyupbit>=0.2.34
+pyupbit==0.2.34   # 내부 요청 함수에 의존 (upbit/exchange.py) — 올릴 땐 호환성 확인
 pandas>=2.0
 numpy>=1.24
 python-dotenv>=1.0
