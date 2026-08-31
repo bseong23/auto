@@ -36,7 +36,8 @@ upbit/
 │   ├── ma_cross.py      이동평균 교차 (추세추종)
 │   ├── rsi.py           RSI 역추세
 │   ├── bollinger.py     볼린저밴드 역추세
-│   └── buy_and_hold.py  존버 (벤치마크)
+│   ├── buy_and_hold.py  존버 (벤치마크)
+│   └── filters.py       추세/변동성 필터 (전략에 덧씌움)
 ├── risk.py          손절 / 익절 / 추적손절
 ├── backtest.py      백테스팅 엔진 + 성과지표
 ├── optimize.py      그리드서치 / 홀드아웃 / 워크포워드
@@ -53,7 +54,9 @@ upbit/
 
 scripts/  01_fetch → 02_indicators → 03_backtest → 04_optimize → 05_live → 06_chart
           07_experiments — 문서의 숫자를 생성 (재현 가능)
-          08_research_timing — 실행 타이밍이 수익에 미치는 영향 조사
+          08_research_timing — 실행 타이밍이 수익에 미치는 영향
+          09_research_strategy — 필터·봉 종류·종목별 검증
+          make_agent — launchd 자동 실행 등록용 plist 생성
 tests/    196개 — 미래참조·수수료·손절 체결가·주문 실패 대응 검증
 docs/     실험기록 · 실전준비점검 · 핸드오프 · 이미지 · 데이터 스냅샷
 ```
@@ -237,6 +240,7 @@ cp .env.example .env      # 키 채우기 — 출금 권한 미체크 + IP 화�
 
 - **[실험 기록](docs/실험기록.md)** — 위 숫자들의 출처와 재현 방법
 - **[조사: 실행 타이밍](docs/조사-실행타이밍.md)** — 제때 실행 / 손절 감시 주기가 수익에 미치는 영향
+- **[조사: 전략 개선](docs/조사-전략개선.md)** — 필터는 덜 잃게 해준다 / 짧은 봉은 슬리피지에 무너진다
 - **[실전 준비 점검](docs/실전-준비-점검.md)** — 실제 돈 넣기 전 남은 작업
 - 배경과 학습 순서: [docs/업비트-자동매매-핸드오프.md](docs/업비트-자동매매-핸드오프.md)
 - 라이브러리: [pyupbit](https://github.com/sharebook-kr/pyupbit)
