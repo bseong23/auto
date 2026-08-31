@@ -21,3 +21,6 @@ reports/
 # 봇 런타임 파일
 data/bot_state.json
 data/bot.lock
+
+# 에이전트 로그
+reports/agent*.log

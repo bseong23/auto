@@ -3,7 +3,7 @@ PY := .venv/bin/python
 PIP := .venv/bin/pip
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test fetch indicators backtest optimize chart bot docs research clean
+.PHONY: help setup test fetch indicators backtest optimize chart bot docs research agent clean
 
 help:  ## 이 목록 보기
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -44,6 +44,9 @@ docs:  ## 실험 기록 재생성 (docs/실험기록.md + 그래프)
 
 bot:  ## 5단계 — 봇 실행 (모의 페이퍼 트레이딩, 돈 안 나감)
 	$(PY) scripts/05_live.py
+
+agent:  ## launchd 자동실행 에이전트 만들기 (미리보기 — 설치는 직접)
+	$(PY) scripts/make_agent.py
 
 clean:  ## 캐시/결과물 삭제
 	rm -rf reports data/cache .pytest_cache
