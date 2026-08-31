@@ -196,6 +196,12 @@ class FakeExchange:
         order = self.orders[order_uuid]
         return order if not order.is_pending else self._fill(order_uuid)
 
+    #: 테스트용 — api_key_info() 가 돌려줄 값
+    key_info: list = field(default_factory=list)
+
+    def api_key_info(self) -> list:
+        return self.key_info
+
     @property
     def equity(self) -> float:
         return self.krw + self.coin * self.price

@@ -408,3 +408,39 @@ def test_panic_sell_with_nothing_to_sell_is_harmless(state_path):
     trader = make_trader(exchange, target=0, state_path=state_path)
     assert trader.panic_sell() is None
     assert load_state(state_path)["entry_price"] is None
+
+
+# ---------- API 키 만료 ----------
+
+def test_warns_when_the_api_key_expires_soon():
+    """키가 만료되면 봇이 조용히 멈추고 포지션이 방치된다."""
+    from datetime import datetime, timedelta, timezone
+
+    soon = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    exchange = FakeExchange(price=PRICE, key_info=[{"expire_at": soon}])
+    assert "3일 뒤 만료" in make_trader(exchange).check_api_key()
+
+
+def test_no_warning_when_the_key_has_plenty_of_time():
+    from datetime import datetime, timedelta, timezone
+
+    later = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+    exchange = FakeExchange(price=PRICE, key_info=[{"expire_at": later}])
+    assert make_trader(exchange).check_api_key() is None
+
+
+def test_reports_an_already_expired_key():
+    from datetime import datetime, timedelta, timezone
+
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    exchange = FakeExchange(price=PRICE, key_info=[{"expire_at": past}])
+    assert "이미 만료" in make_trader(exchange).check_api_key()
+
+
+def test_key_check_is_silent_when_unsupported_or_empty():
+    assert make_trader(FakeExchange(price=PRICE)).check_api_key() is None
+
+
+def test_malformed_expiry_does_not_crash():
+    exchange = FakeExchange(price=PRICE, key_info=[{"expire_at": "말도안되는값"}])
+    assert make_trader(exchange).check_api_key() is None

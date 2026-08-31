@@ -395,6 +395,49 @@ class Trader:
             "order": order, "stop_price": state.get("stop_price"),
         }
 
+    def check_api_key(self, warn_days: int = 7) -> str | None:
+        """API 키 만료가 임박했는지 확인한다. 문제가 있으면 경고 문구를 돌려준다.
+
+        키가 만료되면 봇이 조용히 멈춘다 — 그때 포지션을 들고 있으면 방치된다.
+        확인 자체가 실패해도 봇을 막지는 않는다(권한이 없어 조회만 안 될 수도 있다).
+        """
+        getter = getattr(self.exchange, "api_key_info", None)
+        if getter is None:
+            return None
+        try:
+            keys = getter()
+        except ExchangeError as exc:
+            log.warning("API 키 정보를 확인하지 못했다: %s", exc)
+            return None
+
+        from datetime import timedelta
+
+        soonest = None
+        for entry in keys or []:
+            raw = entry.get("expire_at")
+            if not raw:
+                continue
+            try:
+                expires = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            soonest = expires if soonest is None or expires < soonest else soonest
+
+        if soonest is None:
+            return None
+        remaining = soonest - datetime.now(soonest.tzinfo)
+        if remaining <= timedelta(0):
+            return f"API 키가 이미 만료됐다 ({soonest:%Y-%m-%d})"
+        if remaining <= timedelta(days=warn_days):
+            # timedelta.days 는 내림이라 2.99일이 '2일'이 된다.
+            # 만료 경고에서 하루를 줄여 말하면 위험하므로 올림으로 표시한다.
+            import math
+
+            days = math.ceil(remaining.total_seconds() / 86_400)
+            return (f"API 키가 {days}일 뒤 만료된다 ({soonest:%Y-%m-%d}). "
+                    "만료되면 봇이 멈추고 포지션이 방치된다 — 미리 갱신할 것.")
+        return None
+
     def panic_sell(self) -> OrderResult | None:
         """긴급 전량 매도 + 상태 정리.
 

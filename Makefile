@@ -39,7 +39,7 @@ docs-images:  ## README용 이미지 갱신 (docs/images/)
 docs:  ## 실험 기록 재생성 (docs/실험기록.md + 그래프)
 	$(PY) scripts/07_experiments.py
 
-bot:  ## 5단계 — 봇 실행 (모의, 돈 안 나감)
+bot:  ## 5단계 — 봇 실행 (모의 페이퍼 트레이딩, 돈 안 나감)
 	$(PY) scripts/05_live.py
 
 clean:  ## 캐시/결과물 삭제

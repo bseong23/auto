@@ -152,6 +152,10 @@ def main() -> None:
         print(f"  손절선   : {state['stop_price']:,.0f}원")
     print("=" * 62)
 
+    warning = trader.check_api_key()
+    if warning:
+        print(f"\n  ⚠️  {warning}\n")
+
     if args.status:
         stats = summarize()
         if stats["count"]:
