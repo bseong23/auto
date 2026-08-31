@@ -43,6 +43,7 @@ upbit/
 ├── optimize.py      그리드서치 / 홀드아웃 / 워크포워드
 ├── plotting.py      자산곡선·낙폭 그래프
 ├── multiframe.py    다중 시간프레임 백테스트 (신호=일봉, 감시=분봉)
+├── edge.py          타이밍 엣지 검증 (노출 일치 무작위 기준선)
 │
 ├── exchange.py      거래소 어댑터 (오류 분류 · 타임아웃)
 ├── fake_exchange.py 가짜/페이퍼 거래소 — 실제 돈 없이 실패 시나리오 검증
@@ -56,6 +57,7 @@ scripts/  01_fetch → 02_indicators → 03_backtest → 04_optimize → 05_live
           07_experiments — 문서의 숫자를 생성 (재현 가능)
           08_research_timing — 실행 타이밍이 수익에 미치는 영향
           09_research_strategy — 필터·봉 종류·종목별 검증
+          10_research_edge — 번 돈이 타이밍 실력인지 시장 베타인지
           make_agent — launchd 자동 실행 등록용 plist 생성
 tests/    196개 — 미래참조·수수료·손절 체결가·주문 실패 대응 검증
 docs/     실험기록 · 실전준비점검 · 핸드오프 · 이미지 · 데이터 스냅샷
@@ -241,6 +243,7 @@ cp .env.example .env      # 키 채우기 — 출금 권한 미체크 + IP 화�
 - **[실험 기록](docs/실험기록.md)** — 위 숫자들의 출처와 재현 방법
 - **[조사: 실행 타이밍](docs/조사-실행타이밍.md)** — 제때 실행 / 손절 감시 주기가 수익에 미치는 영향
 - **[조사: 전략 개선](docs/조사-전략개선.md)** — 필터는 덜 잃게 해준다 / 짧은 봉은 슬리피지에 무너진다
+- **[조사: 엣지 검증](docs/조사-엣지검증.md)** — 같은 노출의 무작위 타이밍 1,000개와 비교
 - **[실전 준비 점검](docs/실전-준비-점검.md)** — 실제 돈 넣기 전 남은 작업
 - 배경과 학습 순서: [docs/업비트-자동매매-핸드오프.md](docs/업비트-자동매매-핸드오프.md)
 - 라이브러리: [pyupbit](https://github.com/sharebook-kr/pyupbit)
