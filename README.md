@@ -41,6 +41,7 @@ upbit/
 ├── backtest.py      백테스팅 엔진 + 성과지표
 ├── optimize.py      그리드서치 / 홀드아웃 / 워크포워드
 ├── plotting.py      자산곡선·낙폭 그래프
+├── multiframe.py    다중 시간프레임 백테스트 (신호=일봉, 감시=분봉)
 │
 ├── exchange.py      거래소 어댑터 (오류 분류 · 타임아웃)
 ├── fake_exchange.py 가짜/페이퍼 거래소 — 실제 돈 없이 실패 시나리오 검증
@@ -52,6 +53,7 @@ upbit/
 
 scripts/  01_fetch → 02_indicators → 03_backtest → 04_optimize → 05_live → 06_chart
           07_experiments — 문서의 숫자를 생성 (재현 가능)
+          08_research_timing — 실행 타이밍이 수익에 미치는 영향 조사
 tests/    196개 — 미래참조·수수료·손절 체결가·주문 실패 대응 검증
 docs/     실험기록 · 실전준비점검 · 핸드오프 · 이미지 · 데이터 스냅샷
 ```
@@ -234,6 +236,7 @@ cp .env.example .env      # 키 채우기 — 출금 권한 미체크 + IP 화�
 ## 참고
 
 - **[실험 기록](docs/실험기록.md)** — 위 숫자들의 출처와 재현 방법
+- **[조사: 실행 타이밍](docs/조사-실행타이밍.md)** — 제때 실행 / 손절 감시 주기가 수익에 미치는 영향
 - **[실전 준비 점검](docs/실전-준비-점검.md)** — 실제 돈 넣기 전 남은 작업
 - 배경과 학습 순서: [docs/업비트-자동매매-핸드오프.md](docs/업비트-자동매매-핸드오프.md)
 - 라이브러리: [pyupbit](https://github.com/sharebook-kr/pyupbit)
