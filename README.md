@@ -215,6 +215,28 @@ pyupbit 의 주문 메서드는 실패를 `None` 으로 삼켜서 원인을 알 
 cp .env.example .env      # 키 채우기 — 출금 권한 미체크 + IP 화이트리스트 필수
 ```
 
+### 자동 실행 (macOS launchd)
+
+실행이 하루 늦으면 수익률이 12%p 떨어졌다([조사](docs/조사-실행타이밍.md)).
+잊지 않고 봉 마감마다 돌리려면 launchd 에 건다.
+
+```bash
+make agent                                            # plist 미리보기
+.venv/bin/python scripts/make_agent.py --write        # 생성 (모의 모드)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.upbit.bot.plist
+launchctl kickstart -p gui/$(id -u)/ai.upbit.bot      # 즉시 1회 실행해 검증
+tail reports/agent.log                                # 결과 확인
+launchctl bootout gui/$(id -u)/ai.upbit.bot           # 해제
+```
+
+> ⚠️ **프로젝트가 `~/Desktop` / `~/Documents` / `~/Downloads` 안에 있으면 안 된다.**
+> macOS 가 그 폴더들을 백그라운드 프로세스로부터 보호(TCC)해서, 터미널에선 되는데
+> launchd 가 띄운 python 은 `PermissionError: Operation not permitted` 로 죽는다.
+> `~/upbit` 처럼 홈 바로 아래에 둘 것. (venv 는 절대경로가 박혀 있어 옮기면 재생성 필요)
+>
+> `--live` 는 대화형 확인을 요구하는데 launchd 에는 입력이 없어 **자동 실주문은 구조적으로
+> 막혀 있다.** 의도된 기본값이다.
+
 > 📋 **[docs/실전-준비-점검.md](docs/실전-준비-점검.md)** — 실전 전 점검 12항목과
 > 각각을 어떻게 고쳤는지, **그래도 남는 한계**까지. 실주문 전에 읽을 것.
 
