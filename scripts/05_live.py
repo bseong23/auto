@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from upbit.data import VALID_INTERVALS
 from upbit.exchange import AuthError, ExchangeError, RateLimited
+from upbit.lock import AlreadyRunning, ProcessLock
 from upbit.fake_exchange import FakeExchange
 from upbit.live import (
     MIN_SAFE_ORDER_KRW,
@@ -43,6 +44,7 @@ from upbit.live import (
     setup_logging,
 )
 from upbit.risk import RiskRules
+from upbit.schedule import describe_next, seconds_until_next_close
 from upbit.strategies import BollingerStrategy, MACrossStrategy, RSIStrategy
 
 STRATEGIES = {
@@ -85,7 +87,10 @@ def build_args():
     ap.add_argument("--trailing", action="store_true", help="추적 손절")
     ap.add_argument("--live", action="store_true", help="실제 주문 (안전장치 통과해야 동작)")
     ap.add_argument("--loop", action="store_true", help="반복 실행")
-    ap.add_argument("--every", type=int, default=3600, help="반복 주기(초)")
+    ap.add_argument("--every", type=int, default=None,
+                    help="반복 주기(초). 생략하면 봉 마감에 맞춰 대기한다(권장)")
+    ap.add_argument("--panic-sell", action="store_true",
+                    help="긴급 전량 매도 후 종료")
     ap.add_argument("--status", action="store_true", help="현재 상태만 출력하고 종료")
     ap.add_argument("--reset-paper", action="store_true", help="모의 가상 잔고 초기화")
     return ap.parse_args()
@@ -148,11 +153,24 @@ def main() -> None:
     if args.status:
         return
 
+    if args.panic_sell:
+        print("\n🚨 긴급 전량 매도")
+        if args.live and not _confirm():
+            print("취소했다.")
+            return
+        order = trader.panic_sell()
+        print(f"  {order.describe()}" if order else "  팔 것이 없거나 실패했다 (로그 확인)")
+        print("  상태를 정리했다. 재진입은 전략이 한 번 현금으로 돌아온 뒤에 열린다.")
+        return
+
     if args.live and not _confirm():
         print("취소했다. 잘한 선택일 수도 있다.")
         return
 
     signal.signal(signal.SIGINT, _handle_sigint)
+
+    if args.loop and args.every is None:
+        print(f"  {describe_next(args.interval)}")
 
     while True:
         try:
@@ -177,10 +195,15 @@ def main() -> None:
 
         if not args.loop or _stop:
             break
-        for _ in range(args.every):
-            if _stop:
-                break
-            time.sleep(1)
+
+        # 봉 마감에 맞춰 대기하는 게 기본. --every 를 주면 그 주기로 돈다.
+        wait = args.every if args.every is not None else seconds_until_next_close(args.interval)
+        if args.every is None:
+            print(f"  {describe_next(args.interval)}")
+        slept = 0.0
+        while slept < wait and not _stop:
+            time.sleep(min(1.0, wait - slept))
+            slept += 1.0
         if _stop:
             break
 
@@ -188,4 +211,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # 봇이 두 개 돌면 주문이 두 배 나간다. 주문 금액 상한으로는 못 막는다.
+    try:
+        with ProcessLock(label=f"{sys.argv[1:] or 'default'}"):
+            main()
+    except AlreadyRunning as e:
+        print(f"\n❌ {e}")
+        sys.exit(1)

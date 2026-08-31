@@ -391,6 +391,22 @@ class Trader:
             "order": order, "stop_price": state.get("stop_price"),
         }
 
+    def panic_sell(self) -> OrderResult | None:
+        """긴급 전량 매도 + 상태 정리.
+
+        재진입을 막아둔다 — 급한 상황에 껐다 켰다고 바로 다시 사면 곤란하다.
+        전략이 한 번 현금 신호를 내야 차단이 풀린다.
+        """
+        state = load_state(self.state_path)
+        order = self.sell()
+        self._apply(state, "sell", order, self.current_price())
+        state["blocked"] = True
+        self._persist_paper(state)
+        save_state(state, self.state_path)
+        if order is None:
+            log.warning("긴급 매도: 팔 것이 없거나 주문이 실패했다")
+        return order
+
     # ---------- 내부 ----------
 
     def _reconcile(self, state: dict, held: int, price: float) -> None:

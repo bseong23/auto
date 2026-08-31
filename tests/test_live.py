@@ -376,3 +376,35 @@ def test_dust_is_reported_and_counted_as_cash():
     trader = make_trader(exchange)
     assert trader.dust_krw(PRICE) == pytest.approx(1_000)
     assert trader.current_position(PRICE) == 0
+
+
+# ---------- 긴급 정지 ----------
+
+def test_panic_sell_clears_position_and_persists(state_path):
+    exchange = FakeExchange(krw=0, coin=0.001, price=PRICE)
+    trader = make_trader(exchange, target=1, state_path=state_path)
+
+    order = trader.panic_sell()
+
+    assert order is not None and exchange.coin == pytest.approx(0)
+    state = load_state(state_path)
+    assert state["entry_price"] is None
+    assert state["paper"]["coin"] == pytest.approx(0), "가상 잔고가 저장되지 않았다"
+
+
+def test_panic_sell_blocks_reentry(state_path):
+    """급한 상황에 껐다 켰다고 바로 다시 사면 곤란하다."""
+    exchange = FakeExchange(krw=0, coin=0.001, price=PRICE)
+    trader = make_trader(exchange, target=1, state_path=state_path)
+    trader.panic_sell()
+
+    assert load_state(state_path)["blocked"] is True
+    trader.step()
+    assert exchange.coin == pytest.approx(0), "차단 중인데 다시 샀다"
+
+
+def test_panic_sell_with_nothing_to_sell_is_harmless(state_path):
+    exchange = FakeExchange(krw=100_000, coin=0.0, price=PRICE)
+    trader = make_trader(exchange, target=0, state_path=state_path)
+    assert trader.panic_sell() is None
+    assert load_state(state_path)["entry_price"] is None
