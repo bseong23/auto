@@ -57,6 +57,8 @@ from .exchange import (
     coin_of,
 )
 from .fake_exchange import FakeExchange, PaperExchange
+from .journal import record_fill
+from .notify import Notifier
 from .risk import RiskRules
 from .strategies.base import Strategy
 
@@ -185,6 +187,7 @@ class Trader:
         live: bool = False,
         config: Config | None = None,
         state_path: Path | None = None,
+        notifier: Notifier | None = None,
         sleep=time.sleep,
     ):
         self.strategy = strategy
@@ -195,6 +198,7 @@ class Trader:
         self.risk = risk or RiskRules()
         self.live = live
         self.state_path = state_path
+        self.notifier = notifier or Notifier()
         self._sleep = sleep
         self.order_krw = self._validate_order_size(order_krw)
 
@@ -381,7 +385,7 @@ class Trader:
             else:
                 log.info("변화 없음 — 아무것도 안 한다")
 
-        self._apply(state, action, order, price)
+        self._apply(state, action, order, price, reason)
         self._persist_paper(state)
         save_state(state, self.state_path)
 
@@ -399,7 +403,7 @@ class Trader:
         """
         state = load_state(self.state_path)
         order = self.sell()
-        self._apply(state, "sell", order, self.current_price())
+        self._apply(state, "sell", order, self.current_price(), "긴급")
         state["blocked"] = True
         self._persist_paper(state)
         save_state(state, self.state_path)
@@ -455,6 +459,7 @@ class Trader:
             return False
         if price <= stop:
             log.warning("손절선 이탈 — 현재가 %s ≤ 손절선 %s", f"{price:,.0f}", f"{stop:,.0f}")
+            self.notifier.stop_hit(self.ticker, price, stop)
             return True
 
         if self.risk.trailing:
@@ -466,13 +471,17 @@ class Trader:
                 state["stop_price"] = raised
         return False
 
-    def _apply(self, state: dict, action: str, order: OrderResult | None, price: float) -> None:
+    def _apply(self, state: dict, action: str, order: OrderResult | None,
+               price: float, reason: str = "") -> None:
         if action == "buy" and order is not None:
             self._open(state, order.avg_price or price)
         elif action == "sell":
             self._close(state)
 
         if action != "hold" and order is not None:
+            # 실측 슬리피지를 남긴다 — 백테스트 가정(0.05%)이 맞는지 나중에 검증할 자료
+            record_fill(self.ticker, action, reason or "신호", price, order, self.live)
+            self.notifier.order_filled(self.ticker, action, reason or "신호", order, self.live)
             state.setdefault("history", []).append({
                 "time": datetime.now().isoformat(timespec="seconds"),
                 "action": action,

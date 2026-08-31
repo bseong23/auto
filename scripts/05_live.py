@@ -30,7 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from upbit.data import VALID_INTERVALS
 from upbit.exchange import AuthError, ExchangeError, RateLimited
+from upbit.journal import summarize
 from upbit.lock import AlreadyRunning, ProcessLock
+from upbit.notify import Notifier
 from upbit.fake_exchange import FakeExchange
 from upbit.live import (
     MIN_SAFE_ORDER_KRW,
@@ -125,7 +127,7 @@ def main() -> None:
         trader = Trader(
             strategy=strategy, exchange=exchange, ticker=args.ticker,
             interval=args.interval, order_krw=args.order_krw, risk=risk,
-            live=args.live, config=config,
+            live=args.live, config=config, notifier=Notifier.from_env(),
         )
     except SafetyError as e:
         print(f"\n❌ 안전장치에 걸렸다 (주문은 나가지 않았다):\n   {e}")
@@ -151,6 +153,17 @@ def main() -> None:
     print("=" * 62)
 
     if args.status:
+        stats = summarize()
+        if stats["count"]:
+            print(f"  체결기록  : {stats['count']}건 (실전 {stats['live_count']}건)")
+            if stats["slippage_mean_pct"] is not None:
+                print(f"  실측슬리피지: 평균 {stats['slippage_mean_pct']:.3f}% / "
+                      f"최대 {stats['slippage_max_pct']:.3f}%  "
+                      f"(백테스트 가정 0.050%)")
+                if stats["live_count"] == 0:
+                    print("             └ 모의 체결만 있다 — 모의는 슬리피지를 0으로 "
+                          "가정하므로 이 값은 의미 없다")
+            print(f"  낸 수수료 : {stats['total_fee_krw']:,.0f}원")
         return
 
     if args.panic_sell:
@@ -181,6 +194,7 @@ def main() -> None:
                       f"  {result['order'].describe()}")
         except AuthError as e:
             # 인증 오류는 계속 시도하면 계정이 차단될 수 있다 — 즉시 멈춘다
+            Notifier.from_env().bot_stopped(f"인증 오류: {e}")
             print(f"\n❌ 인증 오류로 중단한다: {e}")
             print("   API 키 만료 / IP 미등록 / 권한 부족을 확인할 것.")
             sys.exit(1)
