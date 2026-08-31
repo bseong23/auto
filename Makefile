@@ -3,7 +3,7 @@ PY := .venv/bin/python
 PIP := .venv/bin/pip
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test fetch indicators backtest optimize chart bot clean
+.PHONY: help setup test fetch indicators backtest optimize chart bot docs clean
 
 help:  ## 이 목록 보기
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -35,6 +35,9 @@ chart:  ## 결과 그래프 생성 (reports/)
 docs-images:  ## README용 이미지 갱신 (docs/images/)
 	$(PY) scripts/06_chart.py --count 800 --out docs/images
 	$(PY) scripts/06_chart.py --count 800 --stop-atr 2.0 --trailing --out docs/images
+
+docs:  ## 실험 기록 재생성 (docs/실험기록.md + 그래프)
+	$(PY) scripts/07_experiments.py
 
 bot:  ## 5단계 — 봇 실행 (모의, 돈 안 나감)
 	$(PY) scripts/05_live.py
