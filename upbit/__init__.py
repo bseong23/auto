@@ -17,6 +17,7 @@ __version__ = "0.1.0"
 from .backtest import UPBIT_FEE, BacktestResult, Trade, compare, run_backtest
 from .data import describe, get_ohlcv, get_tickers
 from .optimize import grid_search, holdout_test, split, walk_forward
+from .risk import RiskRules
 from .strategies import (
     BollingerStrategy,
     BuyAndHoldStrategy,
@@ -43,6 +44,8 @@ __all__ = [
     "BacktestResult",
     "Trade",
     "UPBIT_FEE",
+    # 손절
+    "RiskRules",
     # 최적화·검증
     "grid_search",
     "holdout_test",

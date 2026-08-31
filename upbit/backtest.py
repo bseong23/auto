@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from .risk import OpenPosition, RiskRules, atr_series
 from .strategies.base import Strategy
 
 #: 업비트 원화마켓 기본 수수료 (편도 0.05%)
@@ -31,6 +32,7 @@ class Trade:
     exit_value: float = 0.0
     bars_held: int = 0
     entry_i: int = -1
+    exit_reason: str = "신호"
 
     @property
     def is_open(self) -> bool:
@@ -55,6 +57,7 @@ class BacktestResult:
     fee: float
     total_fees_paid: float
     benchmark: pd.Series = field(repr=False, default=None)
+    risk: RiskRules = field(default_factory=lambda: RiskRules())
 
     # ---- 성과 지표 ----
     @property
@@ -133,6 +136,7 @@ class BacktestResult:
         pct = lambda x: "  n/a " if pd.isna(x) else f"{x:>+7.2%}"
         lines = [
             f"전략        : {self.strategy_name}  {self.params}",
+            f"손절규칙    : {self.risk.describe()}",
             f"기간        : {self.equity.index[0]:%Y-%m-%d} ~ {self.equity.index[-1]:%Y-%m-%d} ({self.years:.2f}년)",
             f"초기자본    : {self.initial_capital:,.0f}원  →  최종 {self.equity.iloc[-1]:,.0f}원",
             "-" * 58,
@@ -157,6 +161,7 @@ class BacktestResult:
                 "청산가": t.exit_price,
                 "손익률": t.return_pct,
                 "보유봉수": t.bars_held,
+                "청산사유": t.exit_reason if not t.is_open else "미청산",
             }
             for t in self.trades
         ]
@@ -169,10 +174,20 @@ def run_backtest(
     initial_capital: float = 1_000_000,
     fee: float = UPBIT_FEE,
     slippage: float = 0.0005,
+    risk: RiskRules | None = None,
 ) -> BacktestResult:
     """전략을 과거 데이터에 돌려 성과를 계산한다.
 
     slippage: 호가 미끄러짐. 시장가 주문은 원하는 가격에 정확히 안 붙는다.
+    risk:     손절/익절 규칙. 전략 신호보다 **우선** 적용된다.
+
+    한 봉 안에서의 처리 순서 (이 순서가 정확성의 핵심):
+      1. 보유 중이면 손절/익절부터 확인한다 — 전략이 "계속 보유"라고 해도 손절이 이긴다.
+      2. 손절로 나갔으면 전략이 한 번 현금으로 돌아올 때까지 재진입을 막는다.
+         (안 막으면 손절 다음 봉에 바로 다시 사서 계속 얻어맞는다.)
+      3. 그 다음 전략 신호를 처리한다.
+      4. 추적 손절선은 손절 판정이 **끝난 뒤에** 이번 봉 고점으로 갱신한다.
+         판정 전에 올리면 이번 봉 고점을 미리 아는 셈이라 미래참조가 된다.
     """
     if len(df) < 2:
         raise ValueError("캔들이 최소 2개는 있어야 백테스트가 가능하다.")
@@ -181,7 +196,13 @@ def run_backtest(
     if not positions.isin((0, 1)).all():
         raise ValueError(f"{strategy.name}: 포지션은 0 또는 1만 허용된다.")
 
+    rules = risk or RiskRules()
+    atr_values = atr_series(df, rules)
+    atr_array = None if atr_values is None else atr_values.to_numpy(dtype=float)
+
     opens = df["open"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    lows = df["low"].to_numpy(dtype=float)
     closes = df["close"].to_numpy(dtype=float)
     target = positions.to_numpy()
     index = df.index
@@ -193,13 +214,55 @@ def run_backtest(
     equity[0] = initial_capital
     trades: list[Trade] = []
     open_trade: Trade | None = None
+    position: OpenPosition | None = None
+    blocked = False  # 손절 직후 재진입 차단
+
+    def known_atr(i: int) -> float | None:
+        """i번 봉 진입/판정 시점에 알 수 있는 ATR — 직전 확정봉 값."""
+        if atr_array is None or i - 1 < 0:
+            return None
+        value = atr_array[i - 1]
+        return None if np.isnan(value) else float(value)
+
+    def close_position(i: int, fill: float, reason: str) -> None:
+        nonlocal cash, coin, fees_paid, open_trade, position
+        gross = coin * fill
+        fees_paid += gross * fee
+        cash = gross * (1 - fee)
+        coin = 0.0
+        if open_trade is not None:
+            open_trade.exit_time = index[i]
+            open_trade.exit_price = fill
+            open_trade.exit_value = cash
+            open_trade.bars_held = i - open_trade.entry_i
+            open_trade.exit_reason = reason
+            trades.append(open_trade)
+            open_trade = None
+        position = None
 
     for i in range(1, len(df)):
-        want = target[i - 1]           # 직전 봉 '종가'에서 내린 판단
-        holding = coin > 0
-        price = opens[i]               # 체결은 이번 봉 '시가'
+        want = target[i - 1]  # 직전 봉 '종가'에서 내린 판단
 
-        if want == 1 and not holding:
+        # 1) 손절/익절이 전략보다 우선한다
+        if coin > 0 and position is not None:
+            hit = position.check_exit(opens[i], lows[i], highs[i])
+            if hit is not None:
+                raw_price, reason = hit
+                close_position(i, raw_price * (1 - slippage), reason)
+                blocked = True
+            else:
+                # 4) 판정이 끝난 뒤에만 추적 손절선을 올린다
+                position.update_trailing(highs[i], known_atr(i), rules)
+
+        # 2) 전략이 현금으로 돌아오면 재진입 차단 해제
+        if want == 0:
+            blocked = False
+
+        # 3) 전략 신호 처리
+        holding = coin > 0
+        price = opens[i]  # 체결은 이번 봉 '시가'
+
+        if want == 1 and not holding and not blocked:
             fill = price * (1 + slippage)
             spend = cash
             fees_paid += spend * fee
@@ -208,20 +271,16 @@ def run_backtest(
             open_trade = Trade(
                 entry_time=index[i], entry_price=fill, entry_value=spend, entry_i=i
             )
+            if rules.is_active:
+                position = OpenPosition(
+                    entry_price=fill,
+                    stop=rules.stop_price(fill, known_atr(i)),
+                    target=rules.target_price(fill),
+                    high_water=fill,
+                )
 
         elif want == 0 and holding:
-            fill = price * (1 - slippage)
-            gross = coin * fill
-            fees_paid += gross * fee
-            cash = gross * (1 - fee)
-            coin = 0.0
-            if open_trade is not None:
-                open_trade.exit_time = index[i]
-                open_trade.exit_price = fill
-                open_trade.exit_value = cash
-                open_trade.bars_held = i - open_trade.entry_i
-                trades.append(open_trade)
-                open_trade = None
+            close_position(i, price * (1 - slippage), "신호")
 
         equity[i] = cash + coin * closes[i]
 
@@ -241,6 +300,7 @@ def run_backtest(
         fee=fee,
         total_fees_paid=fees_paid,
         benchmark=benchmark,
+        risk=rules,
     )
 
 
