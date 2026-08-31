@@ -1,0 +1,16 @@
+# secrets — 절대 커밋 금지
+.env
+*.key
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 로컬 데이터/결과물
+data/cache/
+reports/
+
+# 툴 상태 파일 (프로젝트 코드 아님)
+.omc/

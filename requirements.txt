@@ -1,0 +1,4 @@
+pyupbit>=0.2.34
+pandas>=2.0
+numpy>=1.24
+python-dotenv>=1.0
