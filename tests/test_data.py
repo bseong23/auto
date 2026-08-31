@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 
-from upbite import data
+from upbit import data
 
 
 def test_rejects_bad_interval():

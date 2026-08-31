@@ -14,3 +14,6 @@ reports/
 
 # 툴 상태 파일 (프로젝트 코드 아님)
 .omc/
+
+# macOS
+.DS_Store

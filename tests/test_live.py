@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from upbite.live import MIN_ORDER_KRW, Config, SafetyError, Trader, load_state, save_state
-from upbite.strategies import MACrossStrategy
+from upbit.live import MIN_ORDER_KRW, Config, SafetyError, Trader, load_state, save_state
+from upbit.strategies import MACrossStrategy
 
 
 @pytest.fixture
@@ -110,7 +110,7 @@ def test_config_without_keys_is_not_usable_for_live(monkeypatch):
 # ---------- 상태 저장 ----------
 
 def test_state_roundtrip(tmp_path, monkeypatch):
-    import upbite.live as live_mod
+    import upbit.live as live_mod
     monkeypatch.setattr(live_mod, "STATE_PATH", tmp_path / "state.json")
 
     assert load_state()["position"] == 0          # 파일이 없으면 현금 상태

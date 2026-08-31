@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from upbite import optimize
-from upbite.strategies import MACrossStrategy
+from upbit import optimize
+from upbit.strategies import MACrossStrategy
 
 
 @pytest.fixture

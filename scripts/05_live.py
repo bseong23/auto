@@ -24,9 +24,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from upbite.data import VALID_INTERVALS
-from upbite.live import MIN_ORDER_KRW, Config, SafetyError, Trader, load_state, setup_logging
-from upbite.strategies import BollingerStrategy, MACrossStrategy, RSIStrategy
+from upbit.data import VALID_INTERVALS
+from upbit.live import MIN_ORDER_KRW, Config, SafetyError, Trader, load_state, setup_logging
+from upbit.strategies import BollingerStrategy, MACrossStrategy, RSIStrategy
 
 STRATEGIES = {
     "ma": lambda a: MACrossStrategy(a.fast, a.slow),

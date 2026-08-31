@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from upbite.strategies import (
+from upbit.strategies import (
     BollingerStrategy,
     BuyAndHoldStrategy,
     MACrossStrategy,

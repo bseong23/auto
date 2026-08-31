@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from upbite import indicators as ind
+from upbit import indicators as ind
 
 
 def test_sma_matches_hand_calculation():

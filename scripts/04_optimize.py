@@ -14,10 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from upbite.backtest import UPBIT_FEE
-from upbite.data import VALID_INTERVALS, describe, get_ohlcv
-from upbite.optimize import holdout_test, walk_forward
-from upbite.strategies import MACrossStrategy
+from upbit.backtest import UPBIT_FEE
+from upbit.data import VALID_INTERVALS, describe, get_ohlcv
+from upbit.optimize import holdout_test, walk_forward
+from upbit.strategies import MACrossStrategy
 
 
 def pct(v) -> str:

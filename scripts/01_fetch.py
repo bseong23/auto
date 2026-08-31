@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from upbite.data import VALID_INTERVALS, describe, get_ohlcv
+from upbit.data import VALID_INTERVALS, describe, get_ohlcv
 
 
 def main() -> None:

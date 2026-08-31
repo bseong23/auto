@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from upbite.backtest import compare, run_backtest
-from upbite.strategies import BuyAndHoldStrategy
-from upbite.strategies.base import Strategy
+from upbit.backtest import compare, run_backtest
+from upbit.strategies import BuyAndHoldStrategy
+from upbit.strategies.base import Strategy
 
 
 class FixedPositions(Strategy):

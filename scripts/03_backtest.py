@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from upbite.backtest import UPBIT_FEE, compare, run_backtest
-from upbite.data import VALID_INTERVALS, describe, get_ohlcv
-from upbite.strategies import (
+from upbit.backtest import UPBIT_FEE, compare, run_backtest
+from upbit.data import VALID_INTERVALS, describe, get_ohlcv
+from upbit.strategies import (
     BollingerStrategy,
     BuyAndHoldStrategy,
     MACrossStrategy,

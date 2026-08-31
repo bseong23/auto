@@ -32,7 +32,7 @@ LOG_PATH = ROOT / "reports" / "trades.log"
 #: 업비트 최소 주문 금액 (원화마켓)
 MIN_ORDER_KRW = 5_000
 
-log = logging.getLogger("upbite.live")
+log = logging.getLogger("upbit.live")
 
 
 class SafetyError(RuntimeError):
