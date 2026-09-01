@@ -23,6 +23,7 @@ FIELDS = [
     "time", "mode", "ticker", "action", "reason", "uuid",
     "decision_price", "avg_price", "slippage_pct",
     "volume", "executed_krw", "fee", "fee_pct",
+    "order_type", "limit_fill_pct",   # 지정가 정책의 실제 효과를 재기 위한 열
 ]
 
 
@@ -34,6 +35,8 @@ def record_fill(
     order,
     live: bool,
     path: Path | None = None,
+    order_type: str = "market",
+    limit_fill_pct: float | None = None,
 ) -> dict:
     """체결 하나를 CSV에 덧붙이고, 기록한 내용을 돌려준다.
 
@@ -65,9 +68,12 @@ def record_fill(
             round(order.paid_fee / order.executed_krw * 100, 4)
             if order.executed_krw else ""
         ),
+        "order_type": order_type,
+        "limit_fill_pct": round(limit_fill_pct * 100, 1) if limit_fill_pct is not None else "",
     }
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    _migrate_header(target)
     is_new = not target.exists()
     with target.open("a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)
@@ -75,6 +81,22 @@ def record_fill(
             writer.writeheader()
         writer.writerow(row)
     return row
+
+
+def _migrate_header(target: Path) -> None:
+    """예전 열 구성으로 쓰인 장부에 새 열을 덧붙인다 (기존 행은 빈 값)."""
+    if not target.exists():
+        return
+    with target.open(encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames == FIELDS:
+            return
+        rows = list(reader)
+    with target.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in FIELDS})
 
 
 def summarize(path: Path | None = None) -> dict:
@@ -102,6 +124,8 @@ def summarize(path: Path | None = None) -> dict:
     slippages = numbers("slippage_pct")
     fees = numbers("fee_pct")
     live_rows = [r for r in rows if r["mode"] == "live"]
+    limit_rows = [r for r in rows if r.get("order_type", "").startswith("limit")]
+    limit_pcts = numbers("limit_fill_pct")
 
     return {
         "count": len(rows),
@@ -110,4 +134,6 @@ def summarize(path: Path | None = None) -> dict:
         "slippage_max_pct": max(slippages) if slippages else None,
         "fee_mean_pct": sum(fees) / len(fees) if fees else None,
         "total_fee_krw": sum(numbers("fee")),
+        "limit_attempts": len(limit_rows),
+        "limit_fill_mean_pct": sum(limit_pcts) / len(limit_pcts) if limit_pcts else None,
     }

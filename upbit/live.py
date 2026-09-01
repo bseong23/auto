@@ -54,7 +54,9 @@ from .exchange import (
     RateLimited,
     TransientError,
     UnknownOutcome,
+    align_to_tick,
     coin_of,
+    floor_volume,
 )
 from .fake_exchange import FakeExchange, PaperExchange
 from .journal import record_fill
@@ -78,6 +80,73 @@ class SafetyError(RuntimeError):
     """안전장치에 걸렸을 때. 이 예외가 뜨면 주문은 나가지 않았다."""
 
 
+@dataclass
+class Execution:
+    """한 번의 매수/매도 의도가 여러 주문(지정가 + 시장가 마무리)으로 체결된 결과를 합친다.
+
+    장부·알림·상태 기록은 이 합계를 본다. `legs` 에 개별 주문이 남아 있어
+    "지정가로 얼마나 잡았고 시장가로 얼마나 마무리했나"를 나중에 잴 수 있다.
+    """
+
+    side: str
+    legs: list  # [("limit" | "market", OrderResult), ...]
+
+    @property
+    def filled_legs(self) -> list:
+        return [(kind, o) for kind, o in self.legs if not o.is_empty]
+
+    @property
+    def executed_volume(self) -> float:
+        return sum(o.executed_volume for _, o in self.filled_legs)
+
+    @property
+    def executed_krw(self) -> float:
+        return sum(o.executed_krw for _, o in self.filled_legs)
+
+    @property
+    def paid_fee(self) -> float:
+        return sum(o.paid_fee for _, o in self.filled_legs)
+
+    @property
+    def avg_price(self) -> float | None:
+        return self.executed_krw / self.executed_volume if self.executed_volume else None
+
+    @property
+    def is_empty(self) -> bool:
+        return self.executed_volume == 0
+
+    @property
+    def uuid(self) -> str:
+        ids = [o.uuid for _, o in self.filled_legs] or [o.uuid for _, o in self.legs]
+        return "+".join(ids)
+
+    @property
+    def order_type(self) -> str:
+        kinds = {kind for kind, _ in self.filled_legs}
+        if kinds == {"limit"}:
+            return "limit"
+        if kinds == {"market"}:
+            return "market"
+        return "limit+market" if kinds else "none"
+
+    @property
+    def limit_fill_pct(self) -> float | None:
+        """체결 수량 중 지정가(메이커)로 잡은 비율. 지정가를 안 썼으면 None."""
+        if not any(kind == "limit" for kind, _ in self.legs):
+            return None
+        total = self.executed_volume
+        limit_part = sum(o.executed_volume for kind, o in self.filled_legs if kind == "limit")
+        return limit_part / total if total else 0.0
+
+    def describe(self) -> str:
+        if self.is_empty:
+            return f"{self.side} 미체결"
+        tag = {"limit": "지정가", "market": "시장가", "limit+market": "지정가+시장가"}[self.order_type]
+        pct = f" (지정가 {self.limit_fill_pct:.0%})" if self.order_type == "limit+market" else ""
+        return (f"{self.side} {tag}{pct} — {self.executed_volume:.8f}개 @ {self.avg_price:,.0f}원 "
+                f"= {self.executed_krw:,.0f}원 (수수료 {self.paid_fee:,.0f}원)")
+
+
 # ---------------------------------------------------------------- 설정
 
 @dataclass
@@ -88,6 +157,10 @@ class Config:
     allow_live: bool = False
     #: 모의 모드에서 쓸 가상 원화 (실제 돈 아님)
     paper_krw: float = 1_000_000
+    #: "limit"(지정가 → 미체결분 시장가 마무리) 또는 "market"
+    order_type: str = "limit"
+    #: 지정가 체결을 기다리는 최대 초. 지나면 취소하고 시장가로 마무리한다
+    limit_wait_sec: int = 90
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -98,6 +171,8 @@ class Config:
             max_order_krw=float(os.getenv("UPBIT_MAX_ORDER_KRW", "10000")),
             allow_live=os.getenv("UPBIT_ALLOW_LIVE", "false").strip().lower() == "true",
             paper_krw=float(os.getenv("UPBIT_PAPER_KRW", "1000000")),
+            order_type=os.getenv("UPBIT_ORDER_TYPE", "limit").strip().lower() or "limit",
+            limit_wait_sec=int(os.getenv("UPBIT_LIMIT_WAIT_SEC", "90")),
         )
 
     @property
@@ -189,6 +264,8 @@ class Trader:
         state_path: Path | None = None,
         notifier: Notifier | None = None,
         journal_path: Path | None = None,
+        order_type: str | None = None,
+        limit_wait_sec: int | None = None,
         sleep=time.sleep,
     ):
         self.strategy = strategy
@@ -201,6 +278,10 @@ class Trader:
         self.state_path = state_path
         self.notifier = notifier or Notifier()
         self.journal_path = journal_path  # None 이면 reports/fills.csv
+        self.order_type = (order_type or self.config.order_type)
+        if self.order_type not in ("limit", "market"):
+            raise SafetyError(f"order_type 은 'limit' 또는 'market' 이어야 한다: {self.order_type!r}")
+        self.limit_wait_sec = self.config.limit_wait_sec if limit_wait_sec is None else limit_wait_sec
         self._sleep = sleep
         self.order_krw = self._validate_order_size(order_krw)
 
@@ -255,12 +336,12 @@ class Trader:
 
     # ---------- 주문 ----------
 
-    def _await_fill(self, order: OrderResult) -> OrderResult:
+    def _await_fill(self, order: OrderResult, timeout: float | None = None) -> OrderResult:
         """체결될 때까지 폴링한다. 주문 요청 성공 ≠ 체결."""
         if not order.is_pending:
             return order
-
-        deadline = time.monotonic() + self.FILL_TIMEOUT
+        limit = self.FILL_TIMEOUT if timeout is None else timeout
+        deadline = time.monotonic() + limit
         while time.monotonic() < deadline:
             self._sleep(1)
             try:
@@ -270,67 +351,134 @@ class Trader:
                 continue
             if not order.is_pending:
                 return order
-
-        log.warning("체결 확인 시간 초과 (%s초) — 주문 %s 는 미체결 상태로 남았다",
-                    self.FILL_TIMEOUT, order.uuid)
         return order
 
-    def buy(self) -> OrderResult | None:
-        """시장가 매수. 실패하면 None — **상태를 바꾸면 안 된다.**"""
-        log.warning("[%s] 매수 주문 %s %s원",
-                    "실전" if self.live else "모의", self.ticker, f"{self.order_krw:,.0f}")
+    def _settle_unfilled(self, order: OrderResult) -> OrderResult:
+        """대기 시간이 지난 지정가를 취소하고 **실제 체결량을 재조회**한다.
+
+        취소 요청과 체결이 경합할 수 있다 — 취소하려는 순간 체결돼 버리면 거래소가 취소를
+        거부한다. 그때 '취소됐으니 0체결'이라고 믿고 시장가를 또 내면 **두 번 산다.**
+        그래서 취소 결과가 어떻든 반드시 재조회한 값을 진실로 쓴다.
+        """
+        if not order.is_pending:
+            return order
         try:
-            order = self.exchange.buy_market(self.ticker, self.order_krw)
-        except UnknownOutcome as exc:
-            log.error("매수 결과를 알 수 없다: %s — 잔고를 다시 읽어 맞춘다", exc)
-            return None
-        except OrderRejected as exc:
-            log.error("매수 거부됨(주문 안 들어감): %s", exc)
-            return None
+            self.exchange.cancel_order(order.uuid)
+        except OrderRejected:
+            log.info("취소 시점에 이미 체결돼 있었다 (%s) — 재조회한다", order.uuid)
+        except (TransientError, RateLimited, UnknownOutcome) as exc:
+            log.warning("취소 요청 결과를 모른다: %s — 재조회한다", exc)
+        for _ in range(3):
+            try:
+                return self.exchange.get_order(order.uuid)
+            except (TransientError, RateLimited) as exc:
+                log.warning("재조회 실패, 재시도: %s", exc)
+                self._sleep(1)
+        log.error("주문 %s 의 최종 상태를 확인하지 못했다 — 다음 사이클에 잔고로 맞춘다", order.uuid)
+        return order
+
+    def _handle_order_error(self, what: str, exc: Exception) -> None:
+        if isinstance(exc, UnknownOutcome):
+            log.error("%s 결과를 알 수 없다: %s — 잔고를 다시 읽어 맞춘다", what, exc)
+        elif isinstance(exc, OrderRejected):
+            log.error("%s 거부됨(주문 안 들어감): %s", what, exc)
+        else:
+            log.error("%s 실패: %s", what, exc)
+
+    def buy(self, urgent: bool = False) -> Execution | None:
+        """매수. 기본은 지정가(메이커) → 대기 → 미체결분 시장가. 실패하면 None — **상태를 바꾸면 안 된다.**
+
+        지정가는 스프레드(왕복 ~0.04%)를 아끼지만 체결이 안 될 수 있다. 조사(08)에서 실행이
+        하루 늦으면 -12%p 였다. 그래서 끝까지 기다리지 않고 시장가로 마무리한다.
+        """
+        mode = "실전" if self.live else "모의"
+        legs: list = []
+        budget = self.order_krw
+
+        if self.order_type == "limit" and not urgent:
+            try:
+                bid, _ask = self.exchange.get_best_quotes(self.ticker)
+                price = align_to_tick(bid, "bid")          # 최우선 매수호가에 줄을 선다 (메이커)
+                volume = floor_volume(budget / price)
+                log.warning("[%s] 지정가 매수 %s %.8f개 @ %s (대기 %ds)",
+                            mode, self.ticker, volume, f"{price:,.0f}", self.limit_wait_sec)
+                order = self.exchange.buy_limit(self.ticker, price, volume)
+            except AuthError:
+                raise
+            except ExchangeError as exc:
+                self._handle_order_error("지정가 매수", exc)
+                return None
+            order = self._await_fill(order, timeout=self.limit_wait_sec)
+            order = self._settle_unfilled(order)
+            legs.append(("limit", order))
+            budget -= order.executed_krw + order.paid_fee
+            if budget < MIN_ORDER_KRW:
+                if budget > 0 and not order.is_empty:
+                    log.info("지정가로 대부분 체결, 잔여 %s원은 최소 주문금액 미만이라 남긴다", f"{budget:,.0f}")
+                return self._finish("bid", legs)
+
+        try:
+            log.warning("[%s] 시장가 매수 %s %s원%s", mode, self.ticker, f"{budget:,.0f}",
+                        " (지정가 미체결분 마무리)" if legs else "")
+            order = self.exchange.buy_market(self.ticker, budget)
         except AuthError:
             raise
         except ExchangeError as exc:
-            log.error("매수 실패: %s", exc)
-            return None
+            self._handle_order_error("시장가 매수", exc)
+            return self._finish("bid", legs) if legs else None
+        legs.append(("market", self._await_fill(order)))
+        return self._finish("bid", legs)
 
-        order = self._await_fill(order)
-        if order.is_empty:
-            log.error("매수 주문이 한 조각도 체결되지 않았다 (%s)", order.state)
-            return None
-        log.info("매수 체결 — %s", order.describe())
-        return order
-
-    def sell(self) -> OrderResult | None:
-        """보유 전량 시장가 매도."""
+    def sell(self, urgent: bool = False) -> Execution | None:
+        """보유 전량 매도. 손절·긴급(urgent)은 처음부터 시장가 — 떨어지는 장에서 매도 지정가는 안 잡힌다."""
+        mode = "실전" if self.live else "모의"
         volume = self.held_volume()
         price = self.current_price()
         if volume * price < MIN_ORDER_KRW:
             log.warning("매도할 수량이 최소 주문금액 미만이다 (평가액 %s원) — 먼지로 남긴다",
                         f"{volume * price:,.0f}")
             return None
+        legs: list = []
 
-        log.warning("[%s] 매도 주문 %s %.8f개",
-                    "실전" if self.live else "모의", self.ticker, volume)
+        if self.order_type == "limit" and not urgent:
+            try:
+                _bid, ask = self.exchange.get_best_quotes(self.ticker)
+                limit_price = align_to_tick(ask, "ask")   # 최우선 매도호가에 줄을 선다 (메이커)
+                log.warning("[%s] 지정가 매도 %s %.8f개 @ %s (대기 %ds)",
+                            mode, self.ticker, volume, f"{limit_price:,.0f}", self.limit_wait_sec)
+                order = self.exchange.sell_limit(self.ticker, limit_price, floor_volume(volume))
+            except AuthError:
+                raise
+            except ExchangeError as exc:
+                self._handle_order_error("지정가 매도", exc)
+                return None
+            order = self._await_fill(order, timeout=self.limit_wait_sec)
+            order = self._settle_unfilled(order)
+            legs.append(("limit", order))
+            volume = self.held_volume()                     # 잔여는 잔고가 진실
+            price = self.current_price()
+            if volume * price < MIN_ORDER_KRW:
+                return self._finish("ask", legs)
+
         try:
-            order = self.exchange.sell_market(self.ticker, volume)
-        except UnknownOutcome as exc:
-            log.error("매도 결과를 알 수 없다: %s — 잔고를 다시 읽어 맞춘다", exc)
-            return None
-        except OrderRejected as exc:
-            log.error("매도 거부됨(주문 안 들어감): %s", exc)
-            return None
+            log.warning("[%s] 시장가 매도 %s %.8f개%s", mode, self.ticker, volume,
+                        " (지정가 미체결분 마무리)" if legs else "")
+            order = self.exchange.sell_market(self.ticker, floor_volume(volume))
         except AuthError:
             raise
         except ExchangeError as exc:
-            log.error("매도 실패: %s", exc)
-            return None
+            self._handle_order_error("시장가 매도", exc)
+            return self._finish("ask", legs) if legs else None
+        legs.append(("market", self._await_fill(order)))
+        return self._finish("ask", legs)
 
-        order = self._await_fill(order)
-        if order.is_empty:
-            log.error("매도 주문이 한 조각도 체결되지 않았다 (%s)", order.state)
+    def _finish(self, side: str, legs: list) -> Execution | None:
+        execution = Execution(side=side, legs=legs)
+        if execution.is_empty:
+            log.error("%s 주문이 한 조각도 체결되지 않았다", "매수" if side == "bid" else "매도")
             return None
-        log.info("매도 체결 — %s", order.describe())
-        return order
+        log.info("%s 체결 — %s", "매수" if side == "bid" else "매도", execution.describe())
+        return execution
 
     # ---------- 1회 실행 ----------
 
@@ -363,7 +511,7 @@ class Trader:
 
         # 1) 손절이 전략 신호보다 우선한다
         if held == 1 and self._stop_hit(state, price):
-            order = self.sell()
+            order = self.sell(urgent=True)   # 손절은 시장가 — 지정가 기다릴 때가 아니다
             if order is not None:
                 action, reason = "sell", "손절"
                 state["blocked"] = True
@@ -447,7 +595,7 @@ class Trader:
         전략이 한 번 현금 신호를 내야 차단이 풀린다.
         """
         state = load_state(self.state_path)
-        order = self.sell()
+        order = self.sell(urgent=True)
         self._apply(state, "sell", order, self.current_price(), "긴급")
         state["blocked"] = True
         self._persist_paper(state)
@@ -516,8 +664,7 @@ class Trader:
                 state["stop_price"] = raised
         return False
 
-    def _apply(self, state: dict, action: str, order: OrderResult | None,
-               price: float, reason: str = "") -> None:
+    def _apply(self, state: dict, action: str, order, price: float, reason: str = "") -> None:
         if action == "buy" and order is not None:
             self._open(state, order.avg_price or price)
         elif action == "sell":
@@ -526,7 +673,9 @@ class Trader:
         if action != "hold" and order is not None:
             # 실측 슬리피지를 남긴다 — 백테스트 가정(0.05%)이 맞는지 나중에 검증할 자료
             record_fill(self.ticker, action, reason or "신호", price, order, self.live,
-                        path=self.journal_path)
+                        path=self.journal_path,
+                        order_type=getattr(order, "order_type", "market"),
+                        limit_fill_pct=getattr(order, "limit_fill_pct", None))
             self.notifier.order_filled(self.ticker, action, reason or "신호", order, self.live)
             state.setdefault("history", []).append({
                 "time": datetime.now().isoformat(timespec="seconds"),

@@ -85,3 +85,26 @@ def test_unfilled_order_records_blank_slippage(path):
     empty = OrderResult(uuid="x", side="bid", state="cancel")
     row = record_fill("KRW-BTC", "buy", "신호", 100_000_000, empty, False, path)
     assert row["slippage_pct"] == "" and row["avg_price"] == ""
+
+
+
+def test_old_journal_header_is_migrated_in_place(path):
+    """예전 열 구성 파일에 새 열(order_type, limit_fill_pct)이 덧붙는다. 기존 행은 빈 값."""
+    path.write_text("time,mode,ticker,action,reason,uuid,decision_price,avg_price,slippage_pct,"
+                    "volume,executed_krw,fee,fee_pct\n"
+                    "2026-08-31T18:05:46,paper,KRW-BTC,buy,신호,fake-buy-1,1e8,1e8,0.0,0.00005,5497,2.75,0.05\n",
+                    encoding="utf-8")
+    record_fill("KRW-BTC", "buy", "신호", 1e8, order(uid="u2"), False, path,
+                order_type="limit", limit_fill_pct=1.0)
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    assert rows[0]["order_type"] == "" and rows[1]["order_type"] == "limit"
+    assert rows[1]["limit_fill_pct"] == "100.0"
+
+
+def test_summary_reports_limit_fill_rate(path):
+    record_fill("KRW-BTC", "buy", "신호", 1e8, order(uid="a"), False, path, order_type="limit", limit_fill_pct=1.0)
+    record_fill("KRW-BTC", "buy", "신호", 1e8, order(uid="b"), False, path, order_type="limit+market", limit_fill_pct=0.4)
+    record_fill("KRW-BTC", "sell", "손절", 1e8, order(uid="c", side="ask"), False, path, order_type="market")
+    stats = summarize(path)
+    assert stats["limit_attempts"] == 2
+    assert stats["limit_fill_mean_pct"] == pytest.approx(70.0)

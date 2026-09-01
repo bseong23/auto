@@ -240,3 +240,99 @@ def test_tick_ratio_explains_doge_spread():
     from upbit.exchange import tick_ratio
     assert tick_ratio(115) == pytest.approx(0.1 / 115)
     assert tick_ratio(108_000_000) < 0.0001
+
+
+# ---------- 틱 정렬 / 수량 정밀도 ----------
+
+def test_align_to_tick_rounds_toward_the_maker_side():
+    from upbit.exchange import align_to_tick
+    assert align_to_tick(108_676_543, "bid") == 108_676_000   # 매수는 내림
+    assert align_to_tick(108_676_543, "ask") == 108_677_000   # 매도는 올림
+    assert align_to_tick(115.17, "bid") == pytest.approx(115.1)
+    assert align_to_tick(115.17, "ask") == pytest.approx(115.2)
+
+
+def test_align_to_tick_is_idempotent_on_grid_prices():
+    from upbit.exchange import align_to_tick
+    assert align_to_tick(108_676_000, "bid") == 108_676_000
+    assert align_to_tick(108_676_000, "ask") == 108_676_000
+
+
+def test_floor_volume_never_rounds_up():
+    from upbit.exchange import floor_volume
+    assert floor_volume(0.000050589999) == 0.00005058
+    assert floor_volume(1.0) == 1.0
+
+
+# ---------- 가짜 거래소: 호가 / 지정가 / 취소 ----------
+
+def test_best_quotes_straddle_the_price():
+    ex = FakeExchange(price=100_000_000, spread=0.0004)
+    bid, ask = ex.get_best_quotes("KRW-BTC")
+    assert bid < 100_000_000 < ask
+    assert (ask - bid) / 100_000_000 == pytest.approx(0.0004)
+
+
+def test_limit_buy_fills_at_the_limit_price_without_slippage():
+    ex = FakeExchange(krw=100_000, price=100_000_000, fee=0.0005, slippage=0.01)
+    order = ex.buy_limit("KRW-BTC", 99_000_000, 0.0005)
+    assert order.is_filled
+    assert order.avg_price == pytest.approx(99_000_000)      # 슬리피지 1%가 적용되지 않았다
+    assert ex.coin == pytest.approx(0.0005)
+    assert ex.krw == pytest.approx(100_000 - 49_500 - 49_500 * 0.0005)
+
+
+def test_limit_sell_fills_at_the_limit_price():
+    ex = FakeExchange(krw=0, coin=0.001, price=100_000_000, fee=0.0005)
+    order = ex.sell_limit("KRW-BTC", 101_000_000, 0.001)
+    assert order.is_filled and order.avg_price == pytest.approx(101_000_000)
+    assert ex.krw == pytest.approx(101_000 * (1 - 0.0005))
+
+
+def test_unfilled_limit_order_stays_pending_and_reserves_funds():
+    ex = FakeExchange(krw=100_000, price=100_000_000, limit_fills=False)
+    order = ex.buy_limit("KRW-BTC", 99_000_000, 0.0005)
+    assert order.is_pending
+    assert ex.krw == pytest.approx(100_000 - 49_500)   # 주문금액이 묶인다
+    assert ex.coin == 0
+
+
+def test_cancel_releases_reserved_funds():
+    ex = FakeExchange(krw=100_000, price=100_000_000, limit_fills=False)
+    order = ex.buy_limit("KRW-BTC", 99_000_000, 0.0005)
+    cancelled = ex.cancel_order(order.uuid)
+    assert cancelled.state == "cancel" and cancelled.is_empty
+    assert ex.krw == pytest.approx(100_000)
+
+
+def test_cancel_of_a_filled_order_is_rejected_like_upbit():
+    """취소 요청과 체결이 경합하는 경우 — 호출자는 재조회해서 실제 체결량을 믿어야 한다."""
+    ex = FakeExchange(krw=100_000, price=100_000_000)
+    order = ex.buy_limit("KRW-BTC", 99_000_000, 0.0005)
+    assert order.is_filled
+    with pytest.raises(OrderRejected, match="이미 체결"):
+        ex.cancel_order(order.uuid)
+
+
+def test_partial_limit_fill_returns_the_rest_on_cancel():
+    ex = FakeExchange(krw=100_000, price=100_000_000, partial_fill_ratio=0.4, fee=0.0)
+    order = ex.buy_limit("KRW-BTC", 100_000_000, 0.0005)
+    assert order.executed_volume == pytest.approx(0.0002)
+    assert ex.coin == pytest.approx(0.0002)
+    assert ex.krw == pytest.approx(100_000 - 20_000)      # 미체결 60%는 돌려받았다
+
+
+def test_limit_order_rejects_below_minimum_and_over_balance():
+    ex = FakeExchange(krw=10_000, price=100_000_000)
+    with pytest.raises(OrderRejected, match="최소 주문금액"):
+        ex.buy_limit("KRW-BTC", 100_000_000, 0.00001)
+    with pytest.raises(OrderRejected, match="잔고 부족"):
+        ex.buy_limit("KRW-BTC", 100_000_000, 0.001)
+
+
+def test_limit_timeout_injection_still_places_the_order():
+    ex = FakeExchange(krw=100_000, price=100_000_000)
+    ex.timeout_next_order()
+    with pytest.raises(UnknownOutcome):
+        ex.buy_limit("KRW-BTC", 99_000_000, 0.0005)
+    assert ex.coin > 0

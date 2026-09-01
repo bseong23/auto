@@ -53,6 +53,7 @@ def make_trader(exchange, target=1, state_path=None, config=None, risk=None, **k
         risk=risk,
         config=config or Config(max_order_krw=10_000, allow_live=False),
         state_path=state_path,
+        limit_wait_sec=kw.pop("limit_wait_sec", 0),   # 지정가 대기 없이 즉시 판정 (테스트 속도)
         sleep=lambda _: None,   # 테스트에서 실제로 자지 않는다
         **kw,
     )
@@ -166,7 +167,7 @@ def test_unknown_outcome_never_double_buys(state_path):
     trader.step()
     trader.step()
 
-    buys = [c for c in exchange.calls if c[0] == "buy_market"]
+    buys = [c for c in exchange.calls if c[0] in ("buy_market", "buy_limit")]
     assert len(buys) == 1, "이미 들고 있는데 또 샀다"
 
 
@@ -223,7 +224,8 @@ def test_partial_fill_records_what_actually_filled(state_path):
 
     result = trader.step()
     assert result["action"] == "buy"
-    assert result["order"].executed_krw == pytest.approx(3_000)  # 6,000의 절반
+    # 6,000의 절반. 수량을 소수 8자리로 내림하므로 몇 원 덜 산다
+    assert result["order"].executed_krw == pytest.approx(3_000, rel=1e-3)
 
 
 # ---------- 손절이 실전에 연결됐나 ----------
@@ -313,7 +315,9 @@ def test_history_records_actual_fill_not_the_requested_amount(state_path):
     entry = load_state(state_path)["history"][-1]
     assert entry["action"] == "buy"
     assert entry["fee"] > 0
-    assert entry["avg_price"] == pytest.approx(PRICE)
+    # 지정가(메이커)는 최우선 매수호가에 체결된다 — 시장가(PRICE)보다 싸게
+    bid = PRICE * (1 - exchange.spread / 2)
+    assert entry["avg_price"] == pytest.approx(bid) and entry["avg_price"] < PRICE
 
 
 def test_paper_balance_persists_across_runs(state_path):
@@ -476,3 +480,148 @@ def test_journal_path_can_be_injected(tmp_path, state_path):
     trader.current_signal = lambda count=200: (1, pd.Timestamp("2024-01-01").to_pydatetime())
     trader.step()
     assert journal.exists() and "fake-buy-1" in journal.read_text(encoding="utf-8")
+
+
+
+# ---------- 지정가 실행 정책 ----------
+
+def calls(exchange, *names):
+    return [c for c in exchange.calls if c[0] in names]
+
+
+def test_limit_buy_fills_at_the_bid_and_skips_the_market_leg(state_path):
+    """시장이 와줬다 — 지정가로 전량 체결, 시장가는 안 낸다. 스프레드를 아낀 것."""
+    exchange = FakeExchange(krw=100_000, price=PRICE, spread=0.0004)
+    trader = make_trader(exchange, target=1, state_path=state_path)
+    result = trader.step()
+
+    assert result["action"] == "buy"
+    assert calls(exchange, "buy_limit") and not calls(exchange, "buy_market")
+    assert result["order"].order_type == "limit"
+    assert result["order"].limit_fill_pct == pytest.approx(1.0)
+    assert result["order"].avg_price < PRICE
+
+
+def test_unfilled_limit_is_cancelled_and_finished_at_market(state_path):
+    """대기 시간이 지나도 안 잡히면 취소하고 시장가로 마무리 — 진입을 놓치는 게 더 비싸다(08)."""
+    exchange = FakeExchange(krw=100_000, price=PRICE, limit_fills=False)
+    trader = make_trader(exchange, target=1, state_path=state_path)
+    result = trader.step()
+
+    assert result["action"] == "buy"
+    assert [c[0] for c in calls(exchange, "buy_limit", "cancel_order", "buy_market")] == \
+        ["buy_limit", "cancel_order", "buy_market"]
+    assert result["order"].order_type == "market"
+    assert result["order"].limit_fill_pct == pytest.approx(0.0)
+    assert exchange.coin > 0 and load_state(state_path)["entry_price"] is not None
+
+
+def test_partial_limit_fill_is_topped_up_at_market(state_path):
+    """절반만 지정가로 잡혔고 잔여가 최소 주문금액 이상이면 시장가로 채운다."""
+    exchange = FakeExchange(krw=100_000, price=PRICE, partial_fill_ratio=0.5, fee=0.0)
+    trader = make_trader(exchange, target=1, state_path=state_path,
+                         order_krw=20_000, config=Config(max_order_krw=20_000))
+    result = trader.step()
+
+    assert result["order"].order_type == "limit+market"
+    assert 0.3 < result["order"].limit_fill_pct < 0.7
+    assert result["order"].executed_krw == pytest.approx(20_000 * 0.5 + 10_000 * 0.5, rel=0.01)
+
+
+def test_small_partial_fill_is_accepted_when_remainder_is_below_minimum(state_path):
+    """잔여가 5,000원 미만이면 시장가를 낼 수 없다 — 부분 체결을 그대로 인정한다."""
+    exchange = FakeExchange(krw=100_000, price=PRICE, partial_fill_ratio=0.5, fee=0.0)
+    trader = make_trader(exchange, target=1, state_path=state_path)   # 6,000 → 잔여 3,000
+    result = trader.step()
+
+    assert result["action"] == "buy"
+    assert not calls(exchange, "buy_market")
+    assert result["order"].order_type == "limit"
+
+
+def test_cancel_race_does_not_double_buy(state_path):
+    """취소하려는 순간 체결돼 버린 경우 — '0체결'로 믿고 시장가를 또 내면 두 번 산다."""
+    class RacyExchange(FakeExchange):
+        def cancel_order(self, order_uuid):
+            self.fill_pending(order_uuid)                 # 취소 직전에 체결됨
+            return super().cancel_order(order_uuid)       # → 업비트처럼 '이미 체결' 거부
+
+    exchange = RacyExchange(krw=100_000, price=PRICE, limit_fills=False)
+    trader = make_trader(exchange, target=1, state_path=state_path)
+    result = trader.step()
+
+    assert result["action"] == "buy"
+    assert not calls(exchange, "buy_market"), "취소 실패를 0체결로 오해하고 시장가를 또 냈다"
+    assert exchange.coin == pytest.approx(result["order"].executed_volume)
+
+
+def test_stop_loss_always_uses_market_orders(state_path):
+    """떨어지는 장에서 매도 지정가는 안 잡힌다 — 손절은 시장가."""
+    exchange = FakeExchange(krw=100_000, price=PRICE)
+    trader = make_trader(exchange, target=1, state_path=state_path, risk=RiskRules(stop_loss_pct=0.05))
+    trader.step()
+    exchange.calls.clear()
+
+    exchange.move_price(0.90)
+    result = trader.step()
+
+    assert result["reason"] == "손절"
+    assert calls(exchange, "sell_market") and not calls(exchange, "sell_limit")
+
+
+def test_panic_sell_uses_market_orders(state_path):
+    exchange = FakeExchange(krw=0, coin=0.001, price=PRICE)
+    trader = make_trader(exchange, target=1, state_path=state_path)
+    trader.panic_sell()
+    assert calls(exchange, "sell_market") and not calls(exchange, "sell_limit")
+
+
+def test_limit_sell_fills_at_the_ask(state_path):
+    exchange = FakeExchange(krw=0, coin=0.001, price=PRICE, spread=0.0004)
+    trader = make_trader(exchange, target=0, state_path=state_path)
+    result = trader.step()
+
+    assert result["action"] == "sell"
+    assert calls(exchange, "sell_limit") and not calls(exchange, "sell_market")
+    assert result["order"].avg_price > PRICE      # 매도호가에 팔았다 — 시장가보다 비싸게
+
+
+def test_unfilled_limit_sell_is_finished_at_market(state_path):
+    exchange = FakeExchange(krw=0, coin=0.001, price=PRICE, limit_fills=False)
+    trader = make_trader(exchange, target=0, state_path=state_path)
+    result = trader.step()
+
+    assert result["action"] == "sell"
+    assert [c[0] for c in calls(exchange, "sell_limit", "cancel_order", "sell_market")] == \
+        ["sell_limit", "cancel_order", "sell_market"]
+    assert exchange.coin == pytest.approx(0)
+
+
+def test_market_order_type_skips_limit_entirely(state_path):
+    exchange = FakeExchange(krw=100_000, price=PRICE)
+    trader = make_trader(exchange, target=1, state_path=state_path, order_type="market")
+    trader.step()
+    assert calls(exchange, "buy_market") and not calls(exchange, "buy_limit")
+
+
+def test_journal_records_order_type_and_limit_fill_pct(state_path):
+    import csv
+    import upbit.journal
+
+    exchange = FakeExchange(krw=100_000, price=PRICE, limit_fills=False)
+    make_trader(exchange, target=1, state_path=state_path).step()
+
+    row = list(csv.DictReader(upbit.journal.FILLS_PATH.open(encoding="utf-8")))[-1]
+    assert row["order_type"] == "market" and row["limit_fill_pct"] == "0.0"
+
+
+def test_invalid_order_type_is_refused():
+    with pytest.raises(SafetyError, match="order_type"):
+        make_trader(FakeExchange(), order_type="tw ap")
+
+
+def test_config_reads_order_policy_from_env(monkeypatch):
+    monkeypatch.setenv("UPBIT_ORDER_TYPE", "MARKET")
+    monkeypatch.setenv("UPBIT_LIMIT_WAIT_SEC", "45")
+    config = Config.from_env()
+    assert config.order_type == "market" and config.limit_wait_sec == 45

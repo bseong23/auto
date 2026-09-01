@@ -49,6 +49,10 @@ class FakeExchange:
     slippage: float = 0.0
     #: True면 주문이 즉시 체결되지 않고 'wait' 상태로 남는다
     leave_pending: bool = False
+    #: 지정가 주문이 (시장이 와줘서) 체결되는가. False 면 취소될 때까지 미체결로 남는다
+    limit_fills: bool = True
+    #: 호가 스프레드 (비율). 최우선 매수/매도호가 = price × (1 ∓ spread/2)
+    spread: float = 0.0004
 
     #: 기록 — 테스트에서 "몇 번 주문했나"를 확인할 때 쓴다
     orders: dict[str, OrderResult] = field(default_factory=dict)
@@ -91,7 +95,14 @@ class FakeExchange:
             raise ExchangeError(f"없는 주문: {order_uuid}")
         return self.orders[order_uuid]
 
-    # ---------- 주문 ----------
+    # ---------- 호가 ----------
+
+    def get_best_quotes(self, ticker: str) -> tuple[float, float]:
+        self.calls.append(("get_best_quotes", (ticker,)))
+        half = self.spread / 2
+        return self.price * (1 - half), self.price * (1 + half)
+
+    # ---------- 주문: 시장가 ----------
 
     def buy_market(self, ticker: str, krw: float) -> OrderResult:
         self.calls.append(("buy_market", (ticker, krw)))
@@ -99,34 +110,21 @@ class FakeExchange:
         if error is not None:
             if isinstance(error, UnknownOutcome):
                 # 응답은 못 받았지만 주문은 실제로 들어갔다 — 제일 고약한 경우
-                self._settle_buy(ticker, krw)
+                self._place(("bid", ticker, krw))
             raise error
-
         if krw < MIN_ORDER_KRW:
             raise OrderRejected(f"최소 주문금액 미달: {krw:,.0f}원 < {MIN_ORDER_KRW:,}원")
         if krw > self.krw:
             raise OrderRejected(f"잔고 부족: {self.krw:,.0f}원 < {krw:,.0f}원")
-
-        return self._settle_buy(ticker, krw)
-
-    def _settle_buy(self, ticker: str, krw: float) -> OrderResult:
-        order_uuid = f"fake-buy-{next(self._counter)}"
-        self.krw -= krw  # 주문 금액은 즉시 묶인다
-        result = OrderResult(uuid=order_uuid, side="bid", state="wait")
-        self.orders[order_uuid] = result
-        self._pending[order_uuid] = ("bid", ticker, krw)
-        if not self.leave_pending:
-            self._fill(order_uuid)
-        return result
+        return self._place(("bid", ticker, krw))
 
     def sell_market(self, ticker: str, volume: float) -> OrderResult:
         self.calls.append(("sell_market", (ticker, volume)))
         error = self._take_error()
         if error is not None:
             if isinstance(error, UnknownOutcome):
-                self._settle_sell(ticker, volume)
+                self._place(("ask", ticker, volume))
             raise error
-
         if volume <= 0:
             raise OrderRejected(f"매도 수량이 0 이하다: {volume}")
         if volume > self.coin + 1e-12:
@@ -135,53 +133,132 @@ class FakeExchange:
             raise OrderRejected(
                 f"최소 주문금액 미달: {volume * self.price:,.0f}원 < {MIN_ORDER_KRW:,}원"
             )
+        return self._place(("ask", ticker, volume))
 
-        return self._settle_sell(ticker, volume)
+    # ---------- 주문: 지정가 ----------
 
-    def _settle_sell(self, ticker: str, volume: float) -> OrderResult:
-        order_uuid = f"fake-sell-{next(self._counter)}"
-        self.coin -= volume  # 수량이 즉시 묶인다
-        result = OrderResult(uuid=order_uuid, side="ask", state="wait")
-        self.orders[order_uuid] = result
-        self._pending[order_uuid] = ("ask", ticker, volume)
-        if not self.leave_pending:
+    def buy_limit(self, ticker: str, price: float, volume: float) -> OrderResult:
+        self.calls.append(("buy_limit", (ticker, price, volume)))
+        error = self._take_error()
+        if error is not None:
+            if isinstance(error, UnknownOutcome):
+                self._place(("bid_limit", ticker, price, volume))
+            raise error
+        notional = price * volume
+        if volume <= 0 or notional < MIN_ORDER_KRW:
+            raise OrderRejected(f"최소 주문금액 미달: {notional:,.0f}원 < {MIN_ORDER_KRW:,}원")
+        if notional > self.krw:
+            raise OrderRejected(f"잔고 부족: {self.krw:,.0f}원 < {notional:,.0f}원")
+        return self._place(("bid_limit", ticker, price, volume))
+
+    def sell_limit(self, ticker: str, price: float, volume: float) -> OrderResult:
+        self.calls.append(("sell_limit", (ticker, price, volume)))
+        error = self._take_error()
+        if error is not None:
+            if isinstance(error, UnknownOutcome):
+                self._place(("ask_limit", ticker, price, volume))
+            raise error
+        if volume <= 0:
+            raise OrderRejected(f"매도 수량이 0 이하다: {volume}")
+        if volume > self.coin + 1e-12:
+            raise OrderRejected(f"보유 수량 부족: {self.coin:.8f} < {volume:.8f}")
+        if price * volume < MIN_ORDER_KRW:
+            raise OrderRejected(f"최소 주문금액 미달: {price * volume:,.0f}원 < {MIN_ORDER_KRW:,}원")
+        return self._place(("ask_limit", ticker, price, volume))
+
+    def cancel_order(self, order_uuid: str) -> OrderResult:
+        """미체결 취소. 이미 체결됐으면 업비트처럼 거부한다 — 호출자가 재조회해야 한다."""
+        self.calls.append(("cancel_order", (order_uuid,)))
+        order = self.orders.get(order_uuid)
+        if order is None:
+            raise ExchangeError(f"없는 주문: {order_uuid}")
+        if not order.is_pending:
+            raise OrderRejected(f"이미 체결(또는 취소)된 주문이라 취소할 수 없다: {order_uuid}")
+        intent = self._pending.pop(order_uuid)
+        kind = intent[0]
+        if kind == "bid":
+            self.krw += intent[2]
+        elif kind == "ask":
+            self.coin += intent[2]
+        elif kind == "bid_limit":
+            self.krw += intent[2] * intent[3]
+        else:  # ask_limit
+            self.coin += intent[3]
+        order.state = "cancel"
+        return order
+
+    # ---------- 체결 처리 ----------
+
+    def _place(self, intent: tuple) -> OrderResult:
+        """주문을 접수하고(자금 묶음), 조건이 되면 바로 체결한다."""
+        kind = intent[0]
+        side = "bid" if kind.startswith("bid") else "ask"
+        order_uuid = f"fake-{'buy' if side == 'bid' else 'sell'}-{next(self._counter)}"
+        if kind == "bid":
+            self.krw -= intent[2]
+        elif kind == "ask":
+            self.coin -= intent[2]
+        elif kind == "bid_limit":
+            self.krw -= intent[2] * intent[3]
+        else:
+            self.coin -= intent[3]
+
+        order = OrderResult(uuid=order_uuid, side=side, state="wait")
+        self.orders[order_uuid] = order
+        self._pending[order_uuid] = intent
+
+        is_limit = kind.endswith("_limit")
+        if not self.leave_pending and (not is_limit or self.limit_fills):
             self._fill(order_uuid)
-        return result
+        return order
 
     def _fill(self, order_uuid: str) -> OrderResult:
         """묶여 있던 주문을 체결 처리한다.
 
-        업비트 응답 규약을 따른다:
-        - `executed_funds` = 실제 거래에 쓰인 금액 (**수수료 제외**)
-        - `paid_fee` = 별도로 뗀 수수료
-        매수는 (금액 - 수수료)만큼 코인을 받고, 매도는 (금액 - 수수료)만큼 원화를 받는다.
+        업비트 응답 규약: `executed_funds` = 거래에 쓰인 금액(**수수료 제외**), `paid_fee` 별도.
+        시장가는 현재가 ± 슬리피지, 지정가는 **지정한 가격 그대로**(메이커 — 스프레드를 안 낸다).
         """
         order = self.orders[order_uuid]
-        side, _ticker, amount = self._pending.pop(order_uuid)
-        filled_ratio = min(max(self.partial_fill_ratio, 0.0), 1.0)
+        intent = self._pending.pop(order_uuid)
+        kind = intent[0]
+        ratio = min(max(self.partial_fill_ratio, 0.0), 1.0)
 
-        if side == "bid":
-            spend = amount * filled_ratio
+        if kind == "bid":
+            amount = intent[2]
+            spend = amount * ratio
             fill_price = self.price * (1 + self.slippage)
             fee = spend * self.fee
             volume = (spend - fee) / fill_price
             self.coin += volume
-            self.krw += amount - spend  # 체결 안 된 만큼 되돌려받는다
-            order.executed_volume = volume
-            order.executed_krw = spend - fee
-            order.paid_fee = fee
-        else:
-            sold = amount * filled_ratio
+            self.krw += amount - spend
+            order.executed_volume, order.executed_krw, order.paid_fee = volume, spend - fee, fee
+        elif kind == "ask":
+            amount = intent[2]
+            sold = amount * ratio
             fill_price = self.price * (1 - self.slippage)
             gross = sold * fill_price
             fee = gross * self.fee
             self.krw += gross - fee
-            self.coin += amount - sold  # 체결 안 된 만큼 되돌려받는다
-            order.executed_volume = sold
-            order.executed_krw = gross
-            order.paid_fee = fee
+            self.coin += amount - sold
+            order.executed_volume, order.executed_krw, order.paid_fee = sold, gross, fee
+        elif kind == "bid_limit":
+            price, volume = intent[2], intent[3]
+            got = volume * ratio
+            notional = got * price
+            fee = notional * self.fee
+            self.coin += got
+            self.krw += (volume - got) * price - fee  # 미체결분 반환, 수수료는 별도 차감
+            order.executed_volume, order.executed_krw, order.paid_fee = got, notional, fee
+        else:  # ask_limit
+            price, volume = intent[2], intent[3]
+            sold = volume * ratio
+            gross = sold * price
+            fee = gross * self.fee
+            self.krw += gross - fee
+            self.coin += volume - sold
+            order.executed_volume, order.executed_krw, order.paid_fee = sold, gross, fee
 
-        order.state = "done" if filled_ratio >= 1.0 else "cancel"
+        order.state = "done" if ratio >= 1.0 else "cancel"
         return order
 
     # ---------- 테스트 편의 ----------
@@ -224,3 +301,18 @@ class PaperExchange(FakeExchange):
         self.price = float(price)
         self.calls.append(("get_current_price", (ticker,)))
         return self.price
+
+    def get_best_quotes(self, ticker: str) -> tuple[float, float]:
+        """실제 호가창의 최우선 매수/매도호가. 지정가 가격이 진짜가 되도록.
+
+        **체결 여부는 여전히 가정이다** (limit_fills=True → 잡혔다고 침). 메이커 주문이
+        실제로 잡혔을지는 모의로는 알 수 없다 — 실전 장부의 limit_fill_pct 만이 답이다.
+        """
+        import pyupbit
+
+        book = pyupbit.get_orderbook(ticker)
+        if not book or not book.get("orderbook_units"):
+            raise TransientError(f"{ticker} 호가 조회 실패")
+        top = book["orderbook_units"][0]
+        self.calls.append(("get_best_quotes", (ticker,)))
+        return float(top["bid_price"]), float(top["ask_price"])

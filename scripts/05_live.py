@@ -87,6 +87,11 @@ def build_args():
     ap.add_argument("--stop-pct", type=float, default=None, help="고정 %% 손절")
     ap.add_argument("--take-profit", type=float, default=None, help="고정 %% 익절")
     ap.add_argument("--trailing", action="store_true", help="추적 손절")
+    ap.add_argument("--order-type", choices=["limit", "market"], default=None,
+                    help="limit: 지정가 → 미체결분 시장가 (기본, 스프레드 절감) / market: 시장가만. "
+                         "환경변수 UPBIT_ORDER_TYPE 로도 지정")
+    ap.add_argument("--limit-wait", type=int, default=None,
+                    help="지정가 체결 대기 초 (기본 90, 환경변수 UPBIT_LIMIT_WAIT_SEC)")
     ap.add_argument("--live", action="store_true", help="실제 주문 (안전장치 통과해야 동작)")
     ap.add_argument("--loop", action="store_true", help="반복 실행")
     ap.add_argument("--every", type=int, default=None,
@@ -138,7 +143,7 @@ def main() -> None:
             strategy=strategy, exchange=exchange, ticker=args.ticker,
             interval=args.interval, order_krw=args.order_krw, risk=risk,
             live=args.live, config=config, notifier=Notifier.from_env(),
-            state_path=state_path,
+            state_path=state_path, order_type=args.order_type, limit_wait_sec=args.limit_wait,
         )
     except SafetyError as e:
         print(f"\n❌ 안전장치에 걸렸다 (주문은 나가지 않았다):\n   {e}")
@@ -151,6 +156,8 @@ def main() -> None:
     print(f"  종목/봉  : {args.ticker} / {args.interval}   (상태: {state_path.name})")
     print(f"  전략     : {strategy.name}")
     print(f"  손절     : {risk.describe()}")
+    print(f"  주문방식 : {'지정가 → ' + str(trader.limit_wait_sec) + '초 대기 → 미체결분 시장가' if trader.order_type == 'limit' else '시장가'}"
+          f"  (손절·긴급은 항상 시장가)")
     print(f"  주문금액 : {args.order_krw:,.0f}원 (상한 {config.max_order_krw:,.0f}원)")
     print(f"  현재가   : {price:,.0f}원")
     print(f"  보유상태 : {'보유 중' if held else '현금'}", end="")
@@ -179,6 +186,9 @@ def main() -> None:
                     print("             └ 모의 체결만 있다 — 모의는 슬리피지를 0으로 "
                           "가정하므로 이 값은 의미 없다")
             print(f"  낸 수수료 : {stats['total_fee_krw']:,.0f}원")
+            if stats.get("limit_attempts"):
+                print(f"  지정가    : {stats['limit_attempts']}건 시도, 평균 체결률 "
+                      f"{stats['limit_fill_mean_pct']:.0f}%")
         return
 
     if args.panic_sell:

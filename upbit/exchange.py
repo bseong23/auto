@@ -36,6 +36,7 @@ pyupbit 내부의 `error_handler` 는 `InsufficientFundsBid`, `TooManyRequests`,
 """
 from __future__ import annotations
 
+import math
 import uuid as uuid_module
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -190,8 +191,12 @@ class Exchange(Protocol):
     def get_krw_balance(self) -> float: ...
     def get_coin_balance(self, ticker: str) -> float: ...
     def get_current_price(self, ticker: str) -> float: ...
+    def get_best_quotes(self, ticker: str) -> tuple[float, float]: ...  # (최우선 매수호가, 최우선 매도호가)
     def buy_market(self, ticker: str, krw: float) -> OrderResult: ...
     def sell_market(self, ticker: str, volume: float) -> OrderResult: ...
+    def buy_limit(self, ticker: str, price: float, volume: float) -> OrderResult: ...
+    def sell_limit(self, ticker: str, price: float, volume: float) -> OrderResult: ...
+    def cancel_order(self, order_uuid: str) -> OrderResult: ...
     def get_order(self, order_uuid: str) -> OrderResult: ...
 
 
@@ -216,6 +221,20 @@ def tick_ratio(price: float) -> float:
     BTC(1억) 0.001%, DOGE(115원) 0.087% — 저가 코인은 스프레드만으로 잦은 매매가 불가능하다.
     """
     return krw_tick_size(price) / price
+
+
+def align_to_tick(price: float, side: str) -> float:
+    """지정가를 호가 단위에 맞춘다. 매수는 내림, 매도는 올림 — 둘 다 **메이커 쪽으로** 보수적."""
+    tick = krw_tick_size(price)
+    steps = price / tick
+    aligned = (math.floor(steps) if side == "bid" else math.ceil(steps)) * tick
+    return round(aligned, 4)
+
+
+def floor_volume(volume: float, decimals: int = 8) -> float:
+    """업비트 수량 정밀도(소수 8자리)에 맞춰 내림. 올림하면 잔고 초과로 거부된다."""
+    factor = 10 ** decimals
+    return math.floor(volume * factor) / factor
 
 
 def coin_of(ticker: str) -> str:
@@ -249,6 +268,7 @@ class UpbitExchange:
             for name, obj in (
                 ("_call_post", getattr(self._request_api, "_call_post", None)),
                 ("_call_get", getattr(self._request_api, "_call_get", None)),
+                ("_call_delete", getattr(self._request_api, "_call_delete", None)),
                 ("_request_headers", getattr(self._client, "_request_headers", None)),
             )
             if obj is None
@@ -268,7 +288,9 @@ class UpbitExchange:
 
         url = f"{API_BASE}{path}"
         headers = self._client._request_headers(params) if params else self._client._request_headers()
-        caller = self._request_api._call_post if method == "POST" else self._request_api._call_get
+        caller = {"POST": self._request_api._call_post,
+                  "GET": self._request_api._call_get,
+                  "DELETE": self._request_api._call_delete}[method]
 
         kwargs: dict[str, Any] = {"headers": headers, "timeout": self._timeout}
         if params:
@@ -287,7 +309,7 @@ class UpbitExchange:
             # 주문이 들어갔는지 알 수 없다 — 실패로 단정하면 두 번 살 수 있다
             raise UnknownOutcome(f"{method} {path} 타임아웃: {exc}") from exc
         except requests.ConnectionError as exc:
-            if method == "POST":
+            if method in ("POST", "DELETE"):
                 raise UnknownOutcome(f"{method} {path} 연결 실패: {exc}") from exc
             raise TransientError(f"{method} {path} 연결 실패: {exc}") from exc
         except Exception as exc:
@@ -338,7 +360,42 @@ class UpbitExchange:
     def get_order(self, order_uuid: str) -> OrderResult:
         return parse_order(self._request("GET", "/order", {"uuid": order_uuid}))
 
+    def get_best_quotes(self, ticker: str) -> tuple[float, float]:
+        book = self._pyupbit.get_orderbook(ticker)
+        if not book or not book.get("orderbook_units"):
+            raise TransientError(f"{ticker} 호가 조회 실패")
+        top = book["orderbook_units"][0]
+        return float(top["bid_price"]), float(top["ask_price"])
+
     # ---- 주문 ----
+
+    def buy_limit(self, ticker: str, price: float, volume: float) -> OrderResult:
+        """지정가 매수. 호가에 맞춰 내림 정렬한다."""
+        price = align_to_tick(price, "bid")
+        volume = floor_volume(volume)
+        if price * volume < MIN_ORDER_KRW:
+            raise OrderRejected(f"최소 주문금액 미달: {price * volume:,.0f}원 < {MIN_ORDER_KRW:,}원")
+        return parse_order(self._request("POST", "/orders", {
+            "market": ticker, "side": "bid", "ord_type": "limit",
+            "price": f"{price:.4f}".rstrip("0").rstrip("."), "volume": f"{volume:.8f}",
+        }))
+
+    def sell_limit(self, ticker: str, price: float, volume: float) -> OrderResult:
+        """지정가 매도. 호가에 맞춰 올림 정렬한다."""
+        price = align_to_tick(price, "ask")
+        volume = floor_volume(volume)
+        if volume <= 0:
+            raise OrderRejected(f"매도 수량이 0 이하다: {volume}")
+        if price * volume < MIN_ORDER_KRW:
+            raise OrderRejected(f"최소 주문금액 미달: {price * volume:,.0f}원 < {MIN_ORDER_KRW:,}원")
+        return parse_order(self._request("POST", "/orders", {
+            "market": ticker, "side": "ask", "ord_type": "limit",
+            "price": f"{price:.4f}".rstrip("0").rstrip("."), "volume": f"{volume:.8f}",
+        }))
+
+    def cancel_order(self, order_uuid: str) -> OrderResult:
+        """미체결 주문 취소. 이미 체결된 주문이면 거래소가 거부한다 → 호출자가 재조회해야 한다."""
+        return parse_order(self._request("DELETE", "/order", {"uuid": order_uuid}))
 
     def buy_market(self, ticker: str, krw: float) -> OrderResult:
         """시장가 매수. krw 원어치를 산다."""
