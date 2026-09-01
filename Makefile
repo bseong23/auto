@@ -45,8 +45,8 @@ docs-images:  ## README용 이미지 갱신 (docs/images/)
 docs:  ## 실험 기록 재생성 (docs/실험기록.md + 그래프)
 	$(PY) scripts/07_experiments.py
 
-bot:  ## 5단계 — 봇 실행 (모의 페이퍼 트레이딩, 돈 안 나감)
-	$(PY) scripts/05_live.py
+bot:  ## 5단계 — 봇 실행 (모의 페이퍼 트레이딩, 4시간봉, 돈 안 나감)
+	$(PY) scripts/05_live.py --interval minute240
 
 agent:  ## launchd 자동실행 에이전트 만들기 (미리보기 — 설치는 직접)
 	$(PY) scripts/make_agent.py

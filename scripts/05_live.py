@@ -98,19 +98,29 @@ def build_args():
     return ap.parse_args()
 
 
+def state_path_for(ticker: str, interval: str) -> Path:
+    """상태파일은 (종목, 봉) 단위로 분리한다.
+
+    일봉 봇과 4시간봉 봇이 같은 파일을 쓰면 가상 잔고·진입가·손절선이 섞인다.
+    실수로 다른 봉으로 한 번 돌리기만 해도 운영 중인 봇의 상태가 오염된다.
+    """
+    return Path(__file__).resolve().parent.parent / "data" / f"bot_state_{ticker}_{interval}.json"
+
+
 def main() -> None:
     args = build_args()
     setup_logging()
     config = Config.from_env()
+    state_path = state_path_for(args.ticker, args.interval)
 
     if args.reset_paper:
-        state = load_state()
+        state = load_state(state_path)
         state["paper"] = None
-        save_state(state)
-        print(f"모의 가상 잔고를 초기화했다 ({config.paper_krw:,.0f}원)")
+        save_state(state, state_path)
+        print(f"모의 가상 잔고를 초기화했다 ({config.paper_krw:,.0f}원) — {state_path.name}")
         return
 
-    state = load_state()
+    state = load_state(state_path)
     strategy = STRATEGIES[args.strategy](args)
     risk = RiskRules(
         stop_loss_pct=args.stop_pct, atr_multiple=args.stop_atr,
@@ -128,6 +138,7 @@ def main() -> None:
             strategy=strategy, exchange=exchange, ticker=args.ticker,
             interval=args.interval, order_krw=args.order_krw, risk=risk,
             live=args.live, config=config, notifier=Notifier.from_env(),
+            state_path=state_path,
         )
     except SafetyError as e:
         print(f"\n❌ 안전장치에 걸렸다 (주문은 나가지 않았다):\n   {e}")
@@ -137,7 +148,7 @@ def main() -> None:
     held = trader.current_position(price)
     print("=" * 62)
     print(f"  모드     : {'🔴 실주문 (진짜 돈)' if args.live else '🟢 모의 (가상 잔고 · 실제 시세)'}")
-    print(f"  종목/봉  : {args.ticker} / {args.interval}")
+    print(f"  종목/봉  : {args.ticker} / {args.interval}   (상태: {state_path.name})")
     print(f"  전략     : {strategy.name}")
     print(f"  손절     : {risk.describe()}")
     print(f"  주문금액 : {args.order_krw:,.0f}원 (상한 {config.max_order_krw:,.0f}원)")

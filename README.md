@@ -172,12 +172,15 @@ class MyStrategy(Strategy):
 ## 5단계 실전
 
 ```bash
-make bot                                       # 모의 (페이퍼 트레이딩)
-python scripts/05_live.py --loop               # 봉 마감마다 반복
-python scripts/05_live.py --stop-atr 2 --trailing
-python scripts/05_live.py --status             # 상태 + 실측 슬리피지
-python scripts/05_live.py --panic-sell         # 긴급 전량 매도
+make bot                                                   # 모의 (페이퍼 트레이딩, 4시간봉)
+python scripts/05_live.py --interval minute240 --loop      # 봉 마감마다 반복
+python scripts/05_live.py --interval minute240 --status    # 상태 + 실측 슬리피지
+python scripts/05_live.py --interval minute240 --panic-sell
 ```
+
+**운영 설정은 4시간봉이다.** 실측 슬리피지(0.02%)에서 일봉 대비 +12%p, 60분봉은 수수료에
+죽는다([조사](docs/조사-공격적전략.md)). 상태파일은 `data/bot_state_{종목}_{봉}.json` 으로
+봉마다 분리된다 — 일봉으로 한 번 돌려도 4시간봉 봇의 가상 잔고가 섞이지 않는다.
 
 ### 모의 모드는 주문 흉내가 아니다
 
@@ -223,7 +226,7 @@ cp .env.example .env      # 키 채우기 — 출금 권한 미체크 + IP 화�
 
 ```bash
 make agent                                            # plist 미리보기
-.venv/bin/python scripts/make_agent.py --write        # 생성 (모의 모드)
+.venv/bin/python scripts/make_agent.py --write --interval minute240   # 생성 (모의, 4시간봉)
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.upbit.bot.plist
 launchctl kickstart -p gui/$(id -u)/ai.upbit.bot      # 즉시 1회 실행해 검증
 tail reports/agent.log                                # 결과 확인
