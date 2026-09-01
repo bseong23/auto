@@ -1,0 +1,168 @@
+{
+ "fetched_at": "2026-09-01T14:30:37",
+ "criterion": "KRW 마켓 24h 거래대금 상위 120개 중 2023-06-01 이전 상장, 스테이블코인 제외",
+ "listed_before": "2023-06-01",
+ "universe_size_total": 287,
+ "rows": [
+  {
+   "ticker": "KRW-STORJ",
+   "trade_value_24h": 131179001745.8446,
+   "price": 92.7,
+   "tick_ratio": 0.00010787486515641856,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-XRP",
+   "trade_value_24h": 111568571237.91966,
+   "price": 1910.0,
+   "tick_ratio": 0.0005235602094240838,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-BTC",
+   "trade_value_24h": 80197310009.95012,
+   "price": 108834000.0,
+   "tick_ratio": 9.1883051252366e-06,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-ETH",
+   "trade_value_24h": 52280864466.71852,
+   "price": 3414000.0,
+   "tick_ratio": 0.00029291154071470416,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-SOL",
+   "trade_value_24h": 27495673466.67167,
+   "price": 143200.0,
+   "tick_ratio": 0.00034916201117318437,
+   "bars": 1783,
+   "first_date": "2021-10-15"
+  },
+  {
+   "ticker": "KRW-SC",
+   "trade_value_24h": 25169693720.08355,
+   "price": 1.14,
+   "tick_ratio": 0.0008771929824561405,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-ICX",
+   "trade_value_24h": 23534108715.379803,
+   "price": 21.5,
+   "tick_ratio": 0.00046511627906976747,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-SAND",
+   "trade_value_24h": 15560310036.319118,
+   "price": 50.7,
+   "tick_ratio": 0.0001972386587771203,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-ARB",
+   "trade_value_24h": 13212900058.318571,
+   "price": 154.0,
+   "tick_ratio": 0.0006493506493506494,
+   "bars": 1252,
+   "first_date": "2023-03-30"
+  },
+  {
+   "ticker": "KRW-ONG",
+   "trade_value_24h": 10909140669.83481,
+   "price": 130.0,
+   "tick_ratio": 0.0007692307692307692,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-DOGE",
+   "trade_value_24h": 9940309137.67957,
+   "price": 114.0,
+   "tick_ratio": 0.0008771929824561404,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-ZIL",
+   "trade_value_24h": 9198722200.215141,
+   "price": 3.47,
+   "tick_ratio": 0.00028818443804034583,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-SUI",
+   "trade_value_24h": 8054562014.16779,
+   "price": 1008.0,
+   "tick_ratio": 0.000992063492063492,
+   "bars": 1217,
+   "first_date": "2023-05-04"
+  },
+  {
+   "ticker": "KRW-XLM",
+   "trade_value_24h": 7970288810.4085045,
+   "price": 246.0,
+   "tick_ratio": 0.0004065040650406504,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-STX",
+   "trade_value_24h": 5919878550.823719,
+   "price": 350.0,
+   "tick_ratio": 0.00028571428571428574,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-ADA",
+   "trade_value_24h": 5679429166.589777,
+   "price": 278.0,
+   "tick_ratio": 0.00035971223021582735,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  },
+  {
+   "ticker": "KRW-NEAR",
+   "trade_value_24h": 5654346483.120281,
+   "price": 2713.0,
+   "tick_ratio": 0.00036859565057132326,
+   "bars": 1722,
+   "first_date": "2021-12-15"
+  },
+  {
+   "ticker": "KRW-POL",
+   "trade_value_24h": 5442096251.389356,
+   "price": 128.0,
+   "tick_ratio": 0.00078125,
+   "bars": 1783,
+   "first_date": "2021-10-15"
+  },
+  {
+   "ticker": "KRW-SHIB",
+   "trade_value_24h": 4444985788.853198,
+   "price": 0.00714,
+   "tick_ratio": 0.014005602240896359,
+   "bars": 1323,
+   "first_date": "2023-01-18"
+  },
+  {
+   "ticker": "KRW-LINK",
+   "trade_value_24h": 3240778787.426605,
+   "price": 15750.0,
+   "tick_ratio": 0.0006349206349206349,
+   "bars": 1800,
+   "first_date": "2021-09-28"
+  }
+ ]
+}

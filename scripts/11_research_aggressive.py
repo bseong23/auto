@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from upbit.backtest import CONSERVATIVE_SLIPPAGE, MEASURED_SLIPPAGE, UPBIT_FEE, run_backtest
+from upbit.exchange import tick_ratio
 from upbit.indicators import sma
 from upbit.optimize import summarize_windows, windowed_returns
 from upbit.strategies import BuyAndHoldStrategy, MACrossStrategy
@@ -73,13 +74,6 @@ def walk_asks(units: list[dict], krw: float):
         if remaining <= 1e-9:
             return cost / qty
     return None
-
-
-def tick_ratio(price: float) -> float:
-    """호가 단위 / 가격 — 스프레드가 구조적으로 얼마나 넓을 수밖에 없나."""
-    import pyupbit
-
-    return pyupbit.get_tick_size(price) / price
 
 
 def experiment_slippage(snapshot: dict) -> tuple[str, dict]:

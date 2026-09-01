@@ -221,3 +221,22 @@ def test_call_log_records_what_the_bot_did():
 def test_unknown_order_lookup_raises():
     with pytest.raises(ExchangeError, match="없는 주문"):
         FakeExchange().get_order("존재하지-않음")
+
+
+
+# ---------- 호가 단위 ----------
+
+@pytest.mark.parametrize("price,tick", [
+    (108_000_000, 1_000), (1_500_000, 500), (600_000, 100), (150_000, 50),
+    (50_000, 10), (3_000, 1), (115, 0.1), (5.5, 0.001), (0.5, 0.0001),
+])
+def test_krw_tick_table(price, tick):
+    from upbit.exchange import krw_tick_size
+    assert krw_tick_size(price) == tick
+
+
+def test_tick_ratio_explains_doge_spread():
+    """DOGE 115원의 호가단위 0.1원 → 0.087%. 실측 스프레드 0.87%(≈10틱)의 구조적 하한."""
+    from upbit.exchange import tick_ratio
+    assert tick_ratio(115) == pytest.approx(0.1 / 115)
+    assert tick_ratio(108_000_000) < 0.0001

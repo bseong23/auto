@@ -195,6 +195,29 @@ class Exchange(Protocol):
     def get_order(self, order_uuid: str) -> OrderResult: ...
 
 
+#: 업비트 KRW 마켓 호가 단위 (가격 하한, 호가 단위). 2024-10 개편 기준.
+KRW_TICK_TABLE = (
+    (2_000_000, 1_000), (1_000_000, 500), (500_000, 100), (100_000, 50),
+    (10_000, 10), (1_000, 1), (100, 0.1), (10, 0.01), (1, 0.001), (0, 0.0001),
+)
+
+
+def krw_tick_size(price: float) -> float:
+    """가격대별 호가 단위. pyupbit.get_tick_size 는 이게 아니라 '호가에 맞춰 반올림한 가격'을 준다."""
+    for floor, tick in KRW_TICK_TABLE:
+        if price >= floor:
+            return tick
+    return 0.0001
+
+
+def tick_ratio(price: float) -> float:
+    """호가 단위 / 가격. 스프레드가 구조적으로 얼마나 넓을 수밖에 없는지의 하한.
+
+    BTC(1억) 0.001%, DOGE(115원) 0.087% — 저가 코인은 스프레드만으로 잦은 매매가 불가능하다.
+    """
+    return krw_tick_size(price) / price
+
+
 def coin_of(ticker: str) -> str:
     """'KRW-BTC' → 'BTC'"""
     return ticker.split("-")[-1]

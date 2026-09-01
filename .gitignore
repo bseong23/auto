@@ -24,3 +24,5 @@ data/bot.lock
 
 # 에이전트 로그
 reports/agent*.log
+
+# 유니버스 스냅샷은 커밋한다 (재현용)
