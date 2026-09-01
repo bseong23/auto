@@ -188,6 +188,7 @@ class Trader:
         config: Config | None = None,
         state_path: Path | None = None,
         notifier: Notifier | None = None,
+        journal_path: Path | None = None,
         sleep=time.sleep,
     ):
         self.strategy = strategy
@@ -199,6 +200,7 @@ class Trader:
         self.live = live
         self.state_path = state_path
         self.notifier = notifier or Notifier()
+        self.journal_path = journal_path  # None 이면 reports/fills.csv
         self._sleep = sleep
         self.order_krw = self._validate_order_size(order_krw)
 
@@ -523,7 +525,8 @@ class Trader:
 
         if action != "hold" and order is not None:
             # 실측 슬리피지를 남긴다 — 백테스트 가정(0.05%)이 맞는지 나중에 검증할 자료
-            record_fill(self.ticker, action, reason or "신호", price, order, self.live)
+            record_fill(self.ticker, action, reason or "신호", price, order, self.live,
+                        path=self.journal_path)
             self.notifier.order_filled(self.ticker, action, reason or "신호", order, self.live)
             state.setdefault("history", []).append({
                 "time": datetime.now().isoformat(timespec="seconds"),

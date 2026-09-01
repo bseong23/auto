@@ -444,3 +444,35 @@ def test_key_check_is_silent_when_unsupported_or_empty():
 def test_malformed_expiry_does_not_crash():
     exchange = FakeExchange(price=PRICE, key_info=[{"expire_at": "말도안되는값"}])
     assert make_trader(exchange).check_api_key() is None
+
+
+
+# ---------- 운영 파일 격리 ----------
+
+def test_fills_from_tests_never_touch_the_real_journal(state_path):
+    """pytest 가 실제 reports/fills.csv 를 오염시키던 버그의 회귀 테스트."""
+    from pathlib import Path
+    import upbit.journal
+
+    real_journal = Path(__file__).resolve().parent.parent / "reports" / "fills.csv"
+    before = real_journal.read_bytes() if real_journal.exists() else None
+
+    exchange = FakeExchange(krw=100_000, price=PRICE)
+    make_trader(exchange, target=1, state_path=state_path).step()
+
+    after = real_journal.read_bytes() if real_journal.exists() else None
+    assert before == after, "테스트 체결이 실제 장부에 기록됐다"
+    assert upbit.journal.FILLS_PATH.exists(), "격리된 장부에는 기록돼야 한다"
+
+
+def test_journal_path_can_be_injected(tmp_path, state_path):
+    journal = tmp_path / "custom.csv"
+    exchange = FakeExchange(krw=100_000, price=PRICE)
+    trader = Trader(
+        strategy=FixedSignal(1), exchange=exchange, order_krw=6_000,
+        config=Config(max_order_krw=10_000), state_path=state_path,
+        journal_path=journal, sleep=lambda _: None,
+    )
+    trader.current_signal = lambda count=200: (1, pd.Timestamp("2024-01-01").to_pydatetime())
+    trader.step()
+    assert journal.exists() and "fake-buy-1" in journal.read_text(encoding="utf-8")
