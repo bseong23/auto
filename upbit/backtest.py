@@ -21,6 +21,14 @@ from .strategies.base import Strategy
 #: 업비트 원화마켓 기본 수수료 (편도 0.05%)
 UPBIT_FEE = 0.0005
 
+#: 보수적 슬리피지 가정 (편도). 공식 문서의 숫자는 전부 이걸로 계산했다.
+CONSERVATIVE_SLIPPAGE = 0.0005
+
+#: 실측 슬리피지 (편도). 2026-09-01 업비트 호가창에서 BTC/ETH 1만~500만원 시장가 매수를
+#: 시뮬레이션한 값 0.015~0.017% 를 반올림. 저가·넓은 스프레드 코인(DOGE 0.44%)엔 해당 없다.
+#: 출처: scripts/11_research_aggressive.py → docs/조사-공격적전략.md
+MEASURED_SLIPPAGE = 0.0002
+
 
 @dataclass
 class Trade:

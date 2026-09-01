@@ -156,3 +156,48 @@ def walk_forward(
             }
         )
     return pd.DataFrame(rows)
+
+
+def windowed_returns(
+    df: pd.DataFrame,
+    strategy: Strategy,
+    n_splits: int = 6,
+    warmup: int = 250,
+    fee: float = UPBIT_FEE,
+    slippage: float = 0.0005,
+    initial_capital: float = 1_000_000,
+) -> list[float]:
+    """연속된 검증창 n_splits 개에서 각 창 동안 번 수익률만 모은다.
+
+    파라미터를 재최적화하지 않는다 — '필터를 붙였나', '봉을 바꿨나' 같은 **구조적 선택**을
+    여러 시장 국면에서 비교하는 용도다. 한 창에서만 좋은 건 운이다.
+
+    **워밍업이 핵심이다.** 200일선을 쓰는 전략을 64일짜리 창에 넣으면 지표가 전부 NaN 이라
+    아무것도 안 산다. 그건 전략이 나쁜 게 아니라 평가가 틀린 것이다. 각 창 앞에 `warmup`
+    개의 봉을 붙여 지표를 데운 뒤, 창 안에서 늘어난 자산만 센다. 워밍업 중 잡은 포지션을
+    들고 창에 진입할 수 있는데 그건 실전과 같으므로 그대로 둔다.
+    """
+    usable = len(df) - warmup
+    if usable < n_splits * 30:
+        return []
+    window = usable // n_splits
+    out: list[float] = []
+    for i in range(n_splits):
+        start = warmup + i * window
+        frame = df.iloc[start - warmup : start + window]
+        if len(frame) < warmup + 20:
+            continue
+        equity = run_backtest(frame, strategy, initial_capital, fee, slippage).equity
+        base = equity.iloc[warmup]
+        if base > 0:
+            out.append(float(equity.iloc[-1] / base - 1))
+    return out
+
+
+def summarize_windows(returns: list[float]) -> dict:
+    """평균만 보면 한 번의 대박에 속는다. 흑자 비율과 최악의 창을 같이 본다."""
+    if not returns:
+        return {"평균": float("nan"), "흑자": "0/0", "최악": float("nan"), "n": 0}
+    wins = sum(1 for r in returns if r > 0)
+    return {"평균": sum(returns) / len(returns), "흑자": f"{wins}/{len(returns)}",
+            "최악": min(returns), "n": len(returns)}

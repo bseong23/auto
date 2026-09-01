@@ -27,7 +27,7 @@ import pandas as pd
 
 from upbit.backtest import UPBIT_FEE, run_backtest
 from upbit.data import get_ohlcv
-from upbit.optimize import split
+from upbit.optimize import summarize_windows, windowed_returns
 from upbit.strategies import (
     BuyAndHoldStrategy,
     MACrossStrategy,
@@ -59,51 +59,12 @@ def pct(v) -> str:
     return "n/a" if pd.isna(v) else f"{v:+.2%}"
 
 
-def walk_forward_returns(
-    df: pd.DataFrame, strategy, n_splits: int = SPLITS, warmup: int = WARMUP,
-    slippage: float = SLIPPAGE,
-) -> list[float]:
-    """검증 구간을 여러 개 잡고 각 구간에서 번 수익률만 모은다.
-
-    **워밍업이 핵심이다.** 200일선을 쓰는 전략을 64일짜리 창에 넣으면 지표가
-    전부 NaN 이라 아무것도 안 산다. 그건 전략이 나쁜 게 아니라 평가가 틀린 것이다.
-    그래서 각 검증 창 앞에 `warmup` 개의 봉을 붙여 지표를 데운 뒤,
-    **검증 구간에서 늘어난 자산만** 센다.
-
-    워밍업 구간에 이미 포지션을 들고 검증 구간에 진입할 수 있는데, 그건 실전과
-    같으므로 그대로 둔다.
-    """
-    usable = len(df) - warmup
-    if usable < n_splits * 30:
-        return []
-
-    window = usable // n_splits
-    out = []
-    for i in range(n_splits):
-        test_start = warmup + i * window
-        test_end = test_start + window
-        frame = df.iloc[test_start - warmup : test_end]
-        if len(frame) < warmup + 20:
-            continue
-        equity = run_backtest(frame, strategy, CAPITAL, FEE, slippage).equity
-        start_value = equity.iloc[warmup]
-        if start_value <= 0:
-            continue
-        out.append(equity.iloc[-1] / start_value - 1)
-    return out
+def walk_forward_returns(df, strategy, n_splits=SPLITS, warmup=WARMUP, slippage=SLIPPAGE):
+    return windowed_returns(df, strategy, n_splits, warmup, FEE, slippage, CAPITAL)
 
 
-def summarize(returns: list[float]) -> dict:
-    """검증 구간들의 성적 요약. 평균만 보면 한 번의 대박에 속으므로 흑자 비율과
-    최악의 구간을 같이 본다."""
-    if not returns:
-        return {"평균": float("nan"), "흑자": "0/0", "최악": float("nan")}
-    wins = sum(1 for r in returns if r > 0)
-    return {
-        "평균": sum(returns) / len(returns),
-        "흑자": f"{wins}/{len(returns)}",
-        "최악": min(returns),
-    }
+def summarize(returns):
+    return summarize_windows(returns)
 
 
 # ---------------------------------------------------------------- 실험 1

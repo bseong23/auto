@@ -36,6 +36,7 @@ research:  ## 조사 재실행 (실행 타이밍 + 전략 개선)
 	$(PY) scripts/08_research_timing.py
 	$(PY) scripts/09_research_strategy.py
 	$(PY) scripts/10_research_edge.py
+	$(PY) scripts/11_research_aggressive.py
 
 docs-images:  ## README용 이미지 갱신 (docs/images/)
 	$(PY) scripts/06_chart.py --count 800 --out docs/images

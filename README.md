@@ -58,6 +58,7 @@ scripts/  01_fetch → 02_indicators → 03_backtest → 04_optimize → 05_live
           08_research_timing — 실행 타이밍이 수익에 미치는 영향
           09_research_strategy — 필터·봉 종류·종목별 검증
           10_research_edge — 번 돈이 타이밍 실력인지 시장 베타인지
+          11_research_aggressive — 실측 슬리피지 · 봉 한계선 · 변동성 돌파
           make_agent — launchd 자동 실행 등록용 plist 생성
 tests/    196개 — 미래참조·수수료·손절 체결가·주문 실패 대응 검증
 docs/     실험기록 · 실전준비점검 · 핸드오프 · 이미지 · 데이터 스냅샷
@@ -266,6 +267,7 @@ launchctl bootout gui/$(id -u)/ai.upbit.bot           # 해제
 - **[조사: 실행 타이밍](docs/조사-실행타이밍.md)** — 제때 실행 / 손절 감시 주기가 수익에 미치는 영향
 - **[조사: 전략 개선](docs/조사-전략개선.md)** — 필터는 덜 잃게 해준다 / 짧은 봉은 슬리피지에 무너진다
 - **[조사: 엣지 검증](docs/조사-엣지검증.md)** — 같은 노출의 무작위 타이밍 1,000개와 비교
+- **[조사: 공격적 전략](docs/조사-공격적전략.md)** — 실측 슬리피지는 가정의 ⅓ / 4시간봉이 한계선 / 변동성 돌파는 죽었다
 - **[실전 준비 점검](docs/실전-준비-점검.md)** — 실제 돈 넣기 전 남은 작업
 - 배경과 학습 순서: [docs/업비트-자동매매-핸드오프.md](docs/업비트-자동매매-핸드오프.md)
 - 라이브러리: [pyupbit](https://github.com/sharebook-kr/pyupbit)
