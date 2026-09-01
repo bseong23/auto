@@ -34,7 +34,7 @@ def test_exactly_at_close_moves_to_the_next_day():
         ("minute5", kst(2026, 8, 31, 10, 5), kst(2026, 8, 31, 10, 10)),
         ("minute15", kst(2026, 8, 31, 10, 1), kst(2026, 8, 31, 10, 15)),
         ("minute60", kst(2026, 8, 31, 10, 30), kst(2026, 8, 31, 11, 0)),
-        ("minute240", kst(2026, 8, 31, 10, 30), kst(2026, 8, 31, 12, 0)),
+        ("minute240", kst(2026, 8, 31, 10, 30), kst(2026, 8, 31, 13, 0)),
     ],
 )
 def test_minute_candles_close_on_the_boundary(interval, now, expected):
@@ -92,3 +92,25 @@ def test_result_is_always_in_kst_regardless_of_local_timezone():
 
     utc_now = datetime(2026, 8, 31, 0, 30, tzinfo=timezone.utc)  # KST 09:30
     assert next_close("day", utc_now) == kst(2026, 9, 1, 9, 0)
+
+
+
+# ---------- 업비트 격자는 09:00 KST 앵커 ----------
+
+def test_four_hour_grid_is_anchored_at_nine_kst():
+    """업비트 240분봉은 01·05·09·13·17·21시. 자정 기준(00·04·08…)이면 봉 마감 1시간 전에 깨어난다."""
+    hours = set()
+    for h in range(24):
+        hours.add(next_close("minute240", kst(2026, 9, 1, h, 30)).hour)
+    assert hours == {1, 5, 9, 13, 17, 21}
+
+
+def test_four_hour_close_rolls_across_midnight_on_the_anchored_grid():
+    assert next_close("minute240", kst(2026, 9, 1, 22, 0)) == kst(2026, 9, 2, 1, 0)
+    assert next_close("minute240", kst(2026, 9, 2, 0, 30)) == kst(2026, 9, 2, 1, 0)
+
+
+def test_sub_hour_grids_are_unaffected_by_the_anchor():
+    """60분을 나누는 봉은 09:00 앵커든 자정 앵커든 같은 격자다."""
+    assert next_close("minute15", kst(2026, 9, 1, 10, 1)) == kst(2026, 9, 1, 10, 15)
+    assert next_close("minute60", kst(2026, 9, 1, 10, 30)) == kst(2026, 9, 1, 11, 0)

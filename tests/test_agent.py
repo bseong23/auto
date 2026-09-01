@@ -44,9 +44,10 @@ def test_sub_hour_schedules_repeat_every_hour():
     assert [s["Minute"] for s in slots] == [1, 16, 31, 46]
 
 
-def test_multi_hour_schedules_are_spaced_correctly():
+def test_multi_hour_schedules_follow_the_upbit_grid():
+    """업비트 240분봉 마감은 01·05·09·13·17·21시 — 자정 기준이 아니다."""
     hours = [s["Hour"] for s in make_agent.schedule_for("minute240")]
-    assert hours == [0, 4, 8, 12, 16, 20]
+    assert hours == [1, 5, 9, 13, 17, 21]
 
 
 def test_unknown_interval_is_rejected():

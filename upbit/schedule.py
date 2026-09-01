@@ -5,9 +5,10 @@
 신호가 하루씩 밀린다. 백테스트는 "봉 마감 직후 판단"을 가정했으므로
 **사실상 다른 전략이 된다.**
 
-업비트 기준:
-- 일봉/주봉/월봉은 **09:00 KST** 에 마감된다 (= 00:00 UTC)
-- 분봉은 해당 분 경계에서 마감된다
+업비트 기준 — 모든 봉의 격자가 **09:00 KST(= 00:00 UTC)** 에 앵커돼 있다:
+- 일봉/주봉/월봉은 09:00 KST 에 마감된다
+- 분봉은 09:00 부터 봉 길이 간격으로 마감된다. 60분 이하 봉은 자정 기준과 같은 격자지만
+  **240분봉은 01·05·09·13·17·21시**다 (자정 기준 00·04·08… 이 아니다)
 """
 from __future__ import annotations
 
@@ -31,10 +32,16 @@ def next_close(interval: str, now: datetime | None = None) -> datetime:
 
     if interval in MINUTE_INTERVALS:
         step = MINUTE_INTERVALS[interval]
-        base = current.replace(second=0, microsecond=0)
-        minutes_from_midnight = base.hour * 60 + base.minute
-        next_slot = (minutes_from_midnight // step + 1) * step
-        return base.replace(hour=0, minute=0) + timedelta(minutes=next_slot)
+        # 업비트 분봉 격자는 자정이 아니라 **09:00 KST(=00:00 UTC)** 에 앵커돼 있다.
+        # 60분을 나누는 봉(1~60분)은 어느 쪽에 앵커해도 같지만, 240분봉은 다르다:
+        # 자정 기준이면 00·04·08·12·16·20시, 실제는 01·05·09·13·17·21시다.
+        # 이걸 틀리면 봉 마감 1시간 전에 깨어나 3시간 묵은 봉으로 판단하게 된다.
+        anchor = current.replace(hour=9, minute=0, second=0, microsecond=0)
+        if current < anchor:
+            anchor -= timedelta(days=1)
+        elapsed_min = int((current - anchor).total_seconds() // 60)
+        next_slot = (elapsed_min // step + 1) * step
+        return anchor + timedelta(minutes=next_slot)
 
     if interval == "day":
         today_close = current.replace(hour=9, minute=0, second=0, microsecond=0)

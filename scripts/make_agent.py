@@ -47,7 +47,9 @@ def schedule_for(interval: str) -> list[dict]:
         if step < 60:
             return [{"Minute": m + 1} for m in range(0, 60, step)]
         hours = step // 60
-        return [{"Hour": h, "Minute": 1} for h in range(0, 24, hours)]
+        # 업비트 격자는 09:00 KST 앵커 — 240분봉은 01·05·09·13·17·21시
+        return [{"Hour": (9 + h) % 24, "Minute": 1} for h in sorted(range(0, 24, hours),
+                key=lambda h: (9 + h) % 24)]
     raise ValueError(f"모르는 interval: {interval}")
 
 
