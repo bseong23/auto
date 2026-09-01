@@ -44,6 +44,7 @@ upbit/
 ├── plotting.py      자산곡선·낙폭 그래프
 ├── multiframe.py    다중 시간프레임 백테스트 (신호=일봉, 감시=분봉)
 ├── edge.py          타이밍 엣지 검증 (노출 일치 무작위 기준선)
+├── portfolio.py     여러 종목 동시 보유·리밸런싱 백테스트 (크로스섹션)
 │
 ├── exchange.py      거래소 어댑터 (오류 분류 · 타임아웃)
 ├── fake_exchange.py 가짜/페이퍼 거래소 — 실제 돈 없이 실패 시나리오 검증
@@ -59,9 +60,11 @@ scripts/  01_fetch → 02_indicators → 03_backtest → 04_optimize → 05_live
           09_research_strategy — 필터·봉 종류·종목별 검증
           10_research_edge — 번 돈이 타이밍 실력인지 시장 베타인지
           11_research_aggressive — 실측 슬리피지 · 봉 한계선 · 변동성 돌파
+          12_research_momentum — 크로스섹션 모멘텀 (여러 코인 중 고르기)
+          fetch_universe — 상장일로 거른 유니버스 수집
           make_agent — launchd 자동 실행 등록용 plist 생성
 tests/    196개 — 미래참조·수수료·손절 체결가·주문 실패 대응 검증
-docs/     실험기록 · 실전준비점검 · 핸드오프 · 이미지 · 데이터 스냅샷
+docs/     실험기록 · 조사 5편 · 실전준비점검 · 핸드오프 · 데이터 스냅샷(호가창·유니버스 포함)
 ```
 
 ### 5단계 매핑
@@ -271,6 +274,7 @@ launchctl bootout gui/$(id -u)/ai.upbit.bot           # 해제
 - **[조사: 전략 개선](docs/조사-전략개선.md)** — 필터는 덜 잃게 해준다 / 짧은 봉은 슬리피지에 무너진다
 - **[조사: 엣지 검증](docs/조사-엣지검증.md)** — 같은 노출의 무작위 타이밍 1,000개와 비교
 - **[조사: 공격적 전략](docs/조사-공격적전략.md)** — 실측 슬리피지는 가정의 ⅓ / 4시간봉이 한계선 / 변동성 돌파는 죽었다
+- **[조사: 크로스섹션 모멘텀](docs/조사-크로스섹션모멘텀.md)** — 업비트 알트에서 단기 상대강도는 무작위보다 나쁘다
 - **[실전 준비 점검](docs/실전-준비-점검.md)** — 실제 돈 넣기 전 남은 작업
 - 배경과 학습 순서: [docs/업비트-자동매매-핸드오프.md](docs/업비트-자동매매-핸드오프.md)
 - 라이브러리: [pyupbit](https://github.com/sharebook-kr/pyupbit)

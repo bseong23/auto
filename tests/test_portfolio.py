@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from upbit.portfolio import (
+    bottom_k_selector,
     random_selector,
     run_portfolio,
     top_k_selector,
@@ -199,3 +200,10 @@ def test_summary_is_readable():
     opens, closes = make_frames()
     text = run_portfolio(opens, closes, lookback=20, top_k=2, rebalance_every=7).summary()
     assert "총수익" in text and "MDD" in text and "회전율" in text
+
+
+
+def test_bottom_k_selector_is_the_mirror_of_top_k():
+    mom = pd.Series({"A": 0.1, "B": 0.3, "C": 0.2})
+    assert bottom_k_selector(2)(mom) == ["A", "C"]
+    assert set(bottom_k_selector(2)(mom)) | set(top_k_selector(2)(mom)) == {"A", "B", "C"}

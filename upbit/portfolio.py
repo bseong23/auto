@@ -40,6 +40,14 @@ def top_k_selector(k: int) -> Selector:
     return pick
 
 
+def bottom_k_selector(k: int) -> Selector:
+    """제일 약한 k 개 — 모멘텀이 아니라 **반전**에 베팅. 모멘텀 결과가 무작위보다 나쁘면
+    그 반대가 무작위보다 좋은지로 '버그인지 진짜 반전인지'를 가른다."""
+    def pick(momentum: pd.Series) -> list[str]:
+        return list(momentum.sort_values(ascending=True).index[:k])
+    return pick
+
+
 def random_selector(k: int, rng: np.random.Generator) -> Selector:
     """후보 중 아무거나 k 개 — 순위 매기기에 실력이 있는지 재는 기준선."""
     def pick(momentum: pd.Series) -> list[str]:
